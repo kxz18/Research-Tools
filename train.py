@@ -45,8 +45,12 @@ class Trainer:
         self.train_loader = train_loader
         self.valid_loader = valid_loader
 
+        # distributed training
+        self.local_rank = -1
+
+        # log
         self.model_dir = os.path.join(config.save_dir, 'checkpoint')
-        self.writer = SummaryWriter(config.save_dir)
+        self.writer = None  # initialize right before training
         if not os.path.exists(self.model_dir):
             os.makedirs(self.model_dir)
 
@@ -57,8 +61,6 @@ class Trainer:
         self.last_valid_metric = None
         self.patience = config.patience
 
-        # distributed training
-        self.local_rank = -1
 
     @classmethod
     def to_device(cls, data, device):
@@ -126,6 +128,9 @@ class Trainer:
     def train(self, device_ids, local_rank):
         # set local rank
         self.local_rank = local_rank
+        # init writer
+        if self._is_main_proc():
+            self.writer = SummaryWriter(self.config.save_dir)
         # main device
         main_device_id = local_rank if local_rank != -1 else device_ids[0]
         device = torch.device('cpu' if main_device_id == -1 else f'cuda:{main_device_id}')

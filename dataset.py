@@ -25,6 +25,8 @@ class Dataset(torch.utils.data.Dataset):
         if save_dir is None:
             if not os.path.isdir(file_path):
                 save_dir = os.path.split(file_path)[0]
+            else:
+                save_dir = file_path
             save_dir = os.path.join(save_dir, 'processed')
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
