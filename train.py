@@ -57,6 +57,9 @@ class Trainer:
         self.last_valid_metric = None
         self.patience = config.patience
 
+        # distributed training
+        self.local_rank = -1
+
     @classmethod
     def to_device(cls, data, device):
         if isinstance(data, dict):
@@ -69,8 +72,11 @@ class Trainer:
             data = data.to(device)
         return data
 
+    def _is_main_proc(self):
+        return self.local_rank == 0 or self.local_rank == -1
+
     def _train_epoch(self, device):
-        t_iter = tqdm(self.train_loader)
+        t_iter = tqdm(self.train_loader) if self._is_main_proc() else self.train_loader
         for batch in t_iter:
             batch = self.to_device(batch, device)
             loss = self.train_step(batch, self.global_step)
@@ -79,18 +85,20 @@ class Trainer:
             if self.config.grad_clip is not None:
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.grad_clip)
             self.optimizer.step()
-            t_iter.set_postfix(loss=loss.item())
+            if hasattr(t_iter, 'set_postfix'):
+                t_iter.set_postfix(loss=loss.item())
             self.global_step += 1
             if self.sched_freq == 'batch':
                 self.scheduler.step()
         if self.sched_freq == 'epoch':
             self.scheduler.step()
     
-    def _valid_epoch(self, device, local_rank):
+    def _valid_epoch(self, device):
         metric_arr = []
         self.model.eval()
         with torch.no_grad():
-            for batch in tqdm(self.valid_loader):
+            t_iter = tqdm(self.valid_loader) if self._is_main_proc() else self.valid_loader
+            for batch in t_iter:
                 batch = self.to_device(batch, device)
                 metric = self.valid_step(batch, self.valid_global_step)
                 metric_arr.append(metric.cpu().item())
@@ -98,7 +106,7 @@ class Trainer:
         self.model.train()
         # judge
         valid_metric = np.mean(metric_arr)
-        if (local_rank == 0 or local_rank == -1) and self._metric_better(valid_metric):
+        if self._is_main_proc() and self._metric_better(valid_metric):
             self.patience = self.config.patience
             save_path = os.path.join(self.model_dir, f'epoch{self.epoch}_step{self.global_step}.ckpt')
             torch.save(self.model, save_path)
@@ -116,6 +124,8 @@ class Trainer:
             return old < new
 
     def train(self, device_ids, local_rank):
+        # set local rank
+        self.local_rank = local_rank
         # main device
         main_device_id = local_rank if local_rank != -1 else device_ids[0]
         device = torch.device('cpu' if main_device_id == -1 else f'cuda:{main_device_id}')
@@ -128,16 +138,17 @@ class Trainer:
         else:
             print_log(f'training on {device_ids}')
         for _ in range(self.config.max_epoch):
-            print_log(f'epoch{self.epoch} starts') if local_rank == 0 or local_rank == -1 else 1
+            print_log(f'epoch{self.epoch} starts') if self._is_main_proc() else 1
             self._train_epoch(device)
-            print_log(f'validating ...') if local_rank == 0 or local_rank == -1 else 1
-            self._valid_epoch(device, local_rank)
+            print_log(f'validating ...') if self._is_main_proc() else 1
+            self._valid_epoch(device)
             self.epoch += 1
             if self.patience <= 0:
                 break
 
     def log(self, name, value, step):
-        self.writer.add_scalar(name, value, step)
+        if self._is_main_proc():
+            self.writer.add_scalar(name, value, step)
 
     ########## Overload these functions below ##########
     # define optimizer
@@ -200,7 +211,6 @@ def main(args):
     ########## define your model #########
     model = None
 
-    # check distributed training
     if len(args.gpus) > 1:
         torch.cuda.set_device(args.local_rank)
         torch.distributed.init_process_group(backend='nccl', world_size=len(args.gpus))
