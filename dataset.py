@@ -4,8 +4,6 @@ import os
 import json
 import pickle
 import argparse
-from tqdm import tqdm
-from copy import deepcopy
 
 import numpy as np
 import torch
@@ -63,8 +61,8 @@ class Dataset(torch.utils.data.Dataset):
         self.cur_file_idx, self.cur_idx_range = 0, (0, self.file_num_entries[0])  # left close, right open
         self._load_part()
 
-    def _save_part(self, num_entry):
-        file_name = os.path.join(self.save_dir, f'part_{len(self.file_names)}.pkl')
+    def _save_part(self, save_dir, num_entry):
+        file_name = os.path.join(save_dir, f'part_{len(self.file_names)}.pkl')
         print_log(f'Saving {file_name} ...')
         file_name = os.path.abspath(file_name)
         if num_entry == -1:
@@ -121,7 +119,7 @@ class Dataset(torch.utils.data.Dataset):
         #     while len(self.data) >= num_entry_per_file:
         #         self._save_data(num_entry_per_file)
         if len(self.data):
-            self._save_data(num_entry_per_file)
+            self._save_part(save_dir, num_entry_per_file)
 
     ########## override get item ##########
     def __getitem__(self, idx):
