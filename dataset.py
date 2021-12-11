@@ -16,7 +16,7 @@ from utils.logger import print_log
 
 
 class Dataset(torch.utils.data.Dataset):
-    def __init__(self, file_path, save_dir=None, num_entry_per_file=-1):
+    def __init__(self, file_path, save_dir=None, num_entry_per_file=-1, random=False):
         '''
         file_path: path to the dataset
         save_dir: directory to save the processed data
