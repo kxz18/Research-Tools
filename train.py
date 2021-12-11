@@ -1,6 +1,7 @@
 #!/usr/bin/python
 # -*- coding:utf-8 -*-
 import os
+from random import shuffle
 from networkx.readwrite.gml import Token
 from tqdm import tqdm
 import argparse
@@ -85,7 +86,7 @@ class Trainer:
         if self.sched_freq == 'epoch':
             self.scheduler.step()
     
-    def _valid_epoch(self, device):
+    def _valid_epoch(self, device, local_rank):
         metric_arr = []
         self.model.eval()
         with torch.no_grad():
@@ -97,7 +98,7 @@ class Trainer:
         self.model.train()
         # judge
         valid_metric = np.mean(metric_arr)
-        if self._metric_better(valid_metric):
+        if (local_rank == 0 or local_rank == -1) and self._metric_better(valid_metric):
             self.patience = self.config.patience
             save_path = os.path.join(self.model_dir, f'epoch{self.epoch}_step{self.global_step}.ckpt')
             torch.save(self.model, save_path)
@@ -114,14 +115,23 @@ class Trainer:
         else:
             return old < new
 
-    def train(self, device):
+    def train(self, device_ids, local_rank):
+        # main device
+        main_device_id = local_rank if local_rank != -1 else device_ids[0]
+        device = torch.device('cpu' if main_device_id == -1 else f'cuda:{main_device_id}')
         self.model.to(device)
-        print_log(f'training on {device}')
+        if local_rank != -1:
+            print_log(f'Using data parallel, local rank {local_rank}, all {device_ids}')
+            self.model = torch.nn.parallel.DistributedDataParallel(
+                self.model, device_ids=[local_rank], output_device=local_rank
+            )
+        else:
+            print_log(f'training on {device_ids}')
         for _ in range(self.config.max_epoch):
-            print_log(f'epoch{self.epoch} starts')
+            print_log(f'epoch{self.epoch} starts') if local_rank == 0 or local_rank == -1 else 1
             self._train_epoch(device)
-            print_log(f'validating ...')
-            self._valid_epoch(device)
+            print_log(f'validating ...') if local_rank == 0 or local_rank == -1 else 1
+            self._valid_epoch(device, local_rank)
             self.epoch += 1
             if self.patience <= 0:
                 break
@@ -172,20 +182,45 @@ def parse():
     parser.add_argument('--num_workers', type=int, default=8)
 
     # device
-    parser.add_argument('--gpu', type=int, required=True, help='gpu to use, -1 for cpu')
+    parser.add_argument('--gpus', type=int, nargs='+', required=True, help='gpu to use, -1 for cpu')
+    parser.add_argument("--local_rank", type=int, default=-1,
+                        help="Local rank. Necessary for using the torch.distributed.launch utility.")
 
     return parser.parse_args()
 
 
 def main(args):
-    # load train / valid set
-    train_loader, valid_loader = None
-    # define model
+    ########### load your train / valid set ###########
+    train_set = None
+    valid_set = None
+
+    ########## set your collate_fn ##########
+    collate_fn = None
+
+    ########## define your model #########
     model = None
+
+    # check distributed training
+    if len(args.gpus) > 1:
+        torch.cuda.set_device(args.local_rank)
+        torch.distributed.init_process_group(backend='nccl', world_size=len(args.gpus))
+        train_sampler = torch.utils.data.distributed.DistributedSampler(train_set, shuffle=args.shuffle)
+        args.batch_size = int(args.batch_size / len(args.gpus))
+        if args.local_rank == 0:
+            print_log(f'Batch size on a single GPU: {args.batch_size}')
+    else:
+        train_sampler = None
+    train_loader = DataLoader(train_set, batch_size=args.batch_size,
+                              num_workers=args.num_workers,
+                              shuffle=(args.shuffle and train_sampler is None),
+                              sampler=train_sampler,
+                              collate_fn=collate_fn)
+    valid_loader = DataLoader(valid_set, batch_size=args.batch_size,
+                              num_workers=args.num_workers,
+                              collate_fn=collate_fn)
     config = TrainConfig(args.save_dir, args.lr, args.max_epoch, grad_clip=args.grad_clip)
-    device = torch.device('cpu' if args.gpu == -1 else f'cuda:{args.gpu}')
     trainer = Trainer(model, train_loader, valid_loader, config)
-    trainer.train(device)
+    trainer.train(args.gpus, args.local_rank)
 
 
 if __name__ == '__main__':
