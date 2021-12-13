@@ -51,8 +51,6 @@ class Trainer:
         # log
         self.model_dir = os.path.join(config.save_dir, 'checkpoint')
         self.writer = None  # initialize right before training
-        if not os.path.exists(self.model_dir):
-            os.makedirs(self.model_dir)
 
         # training process recording
         self.global_step = 0
@@ -78,6 +76,8 @@ class Trainer:
         return self.local_rank == 0 or self.local_rank == -1
 
     def _train_epoch(self, device):
+        if self.train_loader.sampler is not None:  # distributed
+            self.train_loader.sampler.set_epoch(self.epoch)
         t_iter = tqdm(self.train_loader) if self._is_main_proc() else self.train_loader
         for batch in t_iter:
             batch = self.to_device(batch, device)
@@ -108,10 +108,12 @@ class Trainer:
         self.model.train()
         # judge
         valid_metric = np.mean(metric_arr)
-        if self._is_main_proc() and self._metric_better(valid_metric):
+        if self._metric_better(valid_metric):
             self.patience = self.config.patience
-            save_path = os.path.join(self.model_dir, f'epoch{self.epoch}_step{self.global_step}.ckpt')
-            torch.save(self.model, save_path)
+            if self._is_main_proc():
+                save_path = os.path.join(self.model_dir, f'epoch{self.epoch}_step{self.global_step}.ckpt')
+                module_to_save = self.model.module if self.local_rank == 0 else self.model
+                torch.save(module_to_save, save_path)
         else:
             self.patience -= 1
         self.last_valid_metric = valid_metric
@@ -131,6 +133,8 @@ class Trainer:
         # init writer
         if self._is_main_proc():
             self.writer = SummaryWriter(self.config.save_dir)
+            if not os.path.exists(self.model_dir):
+                os.makedirs(self.model_dir)
         # main device
         main_device_id = local_rank if local_rank != -1 else device_ids[0]
         device = torch.device('cpu' if main_device_id == -1 else f'cuda:{main_device_id}')
