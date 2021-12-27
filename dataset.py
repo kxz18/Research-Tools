@@ -19,6 +19,7 @@ class InMemoryDataset(torch.utils.data.Dataset):
         '''
         file_path: path to the dataset
         '''
+        super().__init__()
         self.data = self._process(file_path)
 
     def __getitem__(self, idx):
@@ -47,7 +48,7 @@ class PersistentDataset(torch.utils.data.Dataset):
         num_entry_per_file: number of entries in a single file. -1 to save all data into one file 
                             (In-memory dataset)
         '''
-        super(Dataset, self).__init__()
+        super().__init__()
         if save_dir is None:
             if not os.path.isdir(file_path):
                 save_dir = os.path.split(file_path)[0]
