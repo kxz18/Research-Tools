@@ -1,6 +1,7 @@
 #!/usr/bin/python
 # -*- coding:utf-8 -*-
 import os
+import json
 from random import shuffle
 from networkx.readwrite.gml import Token
 from tqdm import tqdm
@@ -27,6 +28,9 @@ class TrainConfig:
         self.metric_min_better = metric_min_better
         self.patience = patience
         self.grad_clip = grad_clip
+
+    def __str__(self):
+        return str(self.__class__) + ': ' + str(self.__dict__)
 
 
 class Trainer:
@@ -76,7 +80,7 @@ class Trainer:
         return self.local_rank == 0 or self.local_rank == -1
 
     def _train_epoch(self, device):
-        if self.train_loader.sampler is not None:  # distributed
+        if self.train_loader.sampler is not None and self.local_rank != -1:  # distributed
             self.train_loader.sampler.set_epoch(self.epoch)
         t_iter = tqdm(self.train_loader) if self._is_main_proc() else self.train_loader
         for batch in t_iter:
@@ -135,6 +139,8 @@ class Trainer:
             self.writer = SummaryWriter(self.config.save_dir)
             if not os.path.exists(self.model_dir):
                 os.makedirs(self.model_dir)
+            with open(os.path.join(self.config.save_dir, 'train_config.json'), 'w') as fout:
+                json.dump(self.config.__dict__, fout)
         # main device
         main_device_id = local_rank if local_rank != -1 else device_ids[0]
         device = torch.device('cpu' if main_device_id == -1 else f'cuda:{main_device_id}')

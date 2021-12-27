@@ -13,7 +13,33 @@ from utils.logger import print_log
 ########## import your packages below ##########
 
 
-class Dataset(torch.utils.data.Dataset):
+# use this class if the whole dataset can be stored in RAM
+class InMemoryDataset(torch.utils.data.Dataset):
+    def __init__(self, file_path):
+        '''
+        file_path: path to the dataset
+        '''
+        self.data = self._process(file_path)
+
+    def __getitem__(self, idx):
+        return self.data[idx]
+
+    def __len__(self):
+        return len(self.data)
+
+    ########### load data from file_path (results will be assigned to self.data) ##########
+    def _process(self, file_path):
+        '''
+        Load data from file_path. Please return a list of data.
+        The results will be assigned to self.data for future use.
+        '''
+        with open(file_path, 'r') as fin:
+            lines = fin.read().strip().split('\n')
+        return lines
+
+
+# use this class to splice the dataset and maintain only one part of it in RAM
+class PersistentDataset(torch.utils.data.Dataset):
     def __init__(self, file_path, save_dir=None, num_entry_per_file=-1, random=False):
         '''
         file_path: path to the dataset
