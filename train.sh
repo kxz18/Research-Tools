@@ -31,8 +31,8 @@ BATCH_SIZE=32
 # set master address and port e.g. ADDR=localhost PORT=9901 bash train.sh
 MASTER_ADDR=localhost
 MASTER_PORT=9901
-if [ $ADDR ]; then MASTER_ADDR=$ADDR fi
-if [ $PORT ]; then MASTER_PORT=$PORT fi
+if [ $ADDR ]; then MASTER_ADDR=$ADDR; fi
+if [ $PORT ]; then MASTER_PORT=$PORT; fi
 echo "Master address: ${MASTER_ADDR}, Master port: ${MASTER_PORT}"
 
 # set gpu, e.g. GPU="0,1,2,3" bash train.sh
