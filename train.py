@@ -72,7 +72,7 @@ class Trainer:
         elif isinstance(data, list) or isinstance(data, tuple):
             res = [cls.to_device(item, device) for item in data]
             data = type(data)(res)
-        else:
+        elif hasattr(data, 'to'):
             data = data.to(device)
         return data
 
@@ -180,7 +180,7 @@ class Trainer:
             'frequency': 'epoch' # or batch
         }
 
-    # train step, note that batch should be dict/list/tuple or other objects with .to(device) attribute
+    # train step, note that batch should be dict/list/tuple/instance. Objects with .to(device) attribute will be automatically moved to the same device as the model
     def train_step(self, batch, batch_idx):
         loss = self.model(batch)
         self.log('Loss/train', loss, batch_idx)
