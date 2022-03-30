@@ -1,6 +1,7 @@
 #!/usr/bin/python
 # -*- coding:utf-8 -*-
 import os
+import re
 import json
 from random import shuffle
 from networkx.readwrite.gml import Token
@@ -53,16 +54,18 @@ class Trainer:
         self.local_rank = -1
 
         # log
-        self.model_dir = os.path.join(config.save_dir, 'checkpoint')
+        self.version = self._get_version()
+        self.config.save_dir = os.path.join(config.save_dir, f'version_{self.version}')
+        self.model_dir = os.path.join(self.config.save_dir, 'checkpoint')
         self.writer = None  # initialize right before training
+        self.writer_buffer = {}
 
         # training process recording
         self.global_step = 0
         self.valid_global_step = 0
         self.epoch = 0
         self.last_valid_metric = None
-        self.patience = config.patience
-
+        self.patience = self.config.patience
 
     @classmethod
     def to_device(cls, data, device):
@@ -79,6 +82,15 @@ class Trainer:
     def _is_main_proc(self):
         return self.local_rank == 0 or self.local_rank == -1
 
+    def _get_version(self):
+        version, pattern = - r'version_(\d+)'
+        if os.path.exists(self.config.save_dir):
+            for fname in os.listdir(self.config.save_dir):
+                ver = re.findall(pattern, fname)
+                if len(ver):
+                    version = max(int(ver[0]), version)
+        return version + 1
+
     def _train_epoch(self, device):
         if self.train_loader.sampler is not None and self.local_rank != -1:  # distributed
             self.train_loader.sampler.set_epoch(self.epoch)
@@ -92,7 +104,7 @@ class Trainer:
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.grad_clip)
             self.optimizer.step()
             if hasattr(t_iter, 'set_postfix'):
-                t_iter.set_postfix(loss=loss.item())
+                t_iter.set_postfix(loss=loss.item(), version=self.version)
             self.global_step += 1
             if self.sched_freq == 'batch':
                 self.scheduler.step()
@@ -121,6 +133,11 @@ class Trainer:
         else:
             self.patience -= 1
         self.last_valid_metric = valid_metric
+        # write valid_metric
+        for name in self.writer_buffer:
+            value = np.mean(self.writer_buffer[name])
+            self.log(name, value, self.epoch)
+        self.writer_buffer = {}
     
     def _metric_better(self, new):
         old = self.last_valid_metric
@@ -161,9 +178,16 @@ class Trainer:
             if self.patience <= 0:
                 break
 
-    def log(self, name, value, step):
+    def log(self, name, value, step, val=False):
         if self._is_main_proc():
-            self.writer.add_scalar(name, value, step)
+            if isinstance(value, torch.Tensor):
+                value = value.cpu().item()
+            if val:
+                if name not in self.writer_buffer:
+                    self.writer_buffer[name] = []
+                self.writer_buffer[name].append(value)
+            else:
+                self.writer.add_scalar(name, value, step)
 
     ########## Overload these functions below ##########
     # define optimizer
@@ -189,7 +213,7 @@ class Trainer:
     # validation step
     def valid_step(self, batch, batch_idx):
         loss = self.model(batch)
-        self.log('Loss/validation', loss, batch_idx)
+        self.log('Loss/validation', loss, batch_idx, val=True)
         return loss
 
 
