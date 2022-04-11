@@ -13,6 +13,7 @@ def parse():
     parser = ArgumentParser(description='Tuning hyperparameters')
     parser.add_argument('--log_dir', type=str, required=True, help='Directory to put logs')
     parser.add_argument('--n_beam', type=int, default=3, help='Beam size')
+    parser.add_argument('--highest', action='store_true', help='Keep the highest metrics instead of the lowest')
     parser.add_argument('--gpu', type=int, required=True, help='GPU to use, currently only support one GPU')
     return parser.parse_args()
 
@@ -38,6 +39,7 @@ def write_res_buffer():
 
 def run(config):
 
+    start = time.time()
     print_results('=' * 20)
     past_values, last_cmd = None, None
     for cmd in cmds():
@@ -62,10 +64,12 @@ def run(config):
             print_results(f'{key}: {metrics[key]}')
     else:
         print_results(metrics)
+    elapsed = time.time() - start
+    print_results(f'Elapsed: {round(elapsed, 2)} s')
     return last_cmd.get_score_from_values(metrics)
 
 
-def beam_search(configs, scores, beam, key, values_choices):
+def beam_search(configs, scores, beam, key, values_choices, highest):
     '''beam search for one parameter'''
 
     all_res = []  # (config, ppl)-like element
@@ -81,12 +85,15 @@ def beam_search(configs, scores, beam, key, values_choices):
             all_res.append((config, score))
             write_res_buffer()
     
-    all_res.sort(key=lambda x: x[1], reverse=True)
+    all_res.sort(key=lambda x: x[1], reverse=True if highest else False)
     # return configs and accu
     return [res[0] for res in all_res[:beam]], [res[1] for res in all_res[:beam]]
 
 
-def main(beam, default_config, hyper_range, seeds):
+def main(beam, default_config, hyper_range, seeds, highest):
+
+    print_results(f'The {"higher" if highest else "lower"} metric, the better')
+
     all_res = []
     train_num = 0
     start = time.time()
@@ -102,7 +109,7 @@ def main(beam, default_config, hyper_range, seeds):
         tries = [(key, hyper_range[key]) for key in hyper_range]
         scores = []
         for key, choices in tries:
-            selected, scores = beam_search(selected, scores, beam, key, choices)
+            selected, scores = beam_search(selected, scores, beam, key, choices, highest)
             train_num += beam * len(choices)
         print_results('='*20 + f'seed: {seed}' + '='*20)
         print_results(f'top {beam} configs:')
@@ -278,7 +285,7 @@ if __name__ == '__main__':
 
     # hyper-parameter choices
     # since learning rate and epochs are strongly correlated, we recommand
-    # put them in neighboring optimization
+    # optimize them in adjacent order
     hyper_range = {
         'lr': [1e-5, 2e-5, 3e-5, 4e-5, 5e-5],
         'max_epochs': [4, 5, 6],
@@ -287,4 +294,4 @@ if __name__ == '__main__':
         'weight_decay': [0.1, 0.01]
     }
 
-    main(beam=ARGS.n_beam, default_config=default_config, hyper_range=hyper_range, seeds=seeds)
+    main(beam=ARGS.n_beam, default_config=default_config, hyper_range=hyper_range, seeds=seeds, highest=ARGS.highest)
