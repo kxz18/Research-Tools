@@ -277,11 +277,13 @@ if __name__ == '__main__':
     seeds = [2022, 42, 37587]
 
     # hyper-parameter choices
+    # since learning rate and epochs are strongly correlated, we recommand
+    # put them in neighboring optimization
     hyper_range = {
         'lr': [1e-5, 2e-5, 3e-5, 4e-5, 5e-5],
+        'max_epochs': [4, 5, 6],
         'fgm_eps': [0.1, 1, 3, 5],
         'warm_up': [0.01, 0.03, 0.06],
-        'max_epochs': [4, 5, 6],
         'weight_decay': [0.1, 0.01]
     }
 
