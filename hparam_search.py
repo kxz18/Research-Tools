@@ -132,7 +132,7 @@ def main(beam, default_config, hyper_range, seeds, highest):
 
 
 def config_to_bash_args(config, keys=None):
-    cmd = ''
+    cmd = ' '
     if keys is None:
         keys = config.keys()
     for key in keys:
