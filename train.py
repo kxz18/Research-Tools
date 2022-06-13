@@ -83,7 +83,7 @@ class Trainer:
         return self.local_rank == 0 or self.local_rank == -1
 
     def _get_version(self):
-        version, pattern = - r'version_(\d+)'
+        version, pattern = -1, r'version_(\d+)'
         if os.path.exists(self.config.save_dir):
             for fname in os.listdir(self.config.save_dir):
                 ver = re.findall(pattern, fname)
