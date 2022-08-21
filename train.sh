@@ -44,7 +44,8 @@ echo "Using GPUs: $GPU"
 GPU_ARR=(`echo $GPU | tr ',' ' '`)
 
 if [ ${#GPU_ARR[@]} -gt 1 ]; then
-	PREFIX="python -m torch.distributed.launch --nproc_per_node=${#GPU_ARR[@]} --master_addr=${MASTER_ADDR} --master_port=${MASTER_PORT}"
+	export OMP_NUM_THREADS=2
+	PREFIX="torchrun --nproc_per_node=${#GPU_ARR[@]} --master_addr=${MASTER_ADDR} --master_port=${MASTER_PORT} --standalone --nnodes=1"
 else
     PREFIX="python"
 fi

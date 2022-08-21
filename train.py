@@ -249,6 +249,7 @@ def main(args):
     model = None
 
     if len(args.gpus) > 1:
+        args.local_rank = int(os.environ['LOCAL_RANK'])
         torch.cuda.set_device(args.local_rank)
         torch.distributed.init_process_group(backend='nccl', world_size=len(args.gpus))
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_set, shuffle=args.shuffle)
@@ -256,6 +257,7 @@ def main(args):
         if args.local_rank == 0:
             print_log(f'Batch size on a single GPU: {args.batch_size}')
     else:
+        args.local_rank = -1
         train_sampler = None
     train_loader = DataLoader(train_set, batch_size=args.batch_size,
                               num_workers=args.num_workers,
