@@ -20,13 +20,16 @@ setup_seed(SEED)
 
 
 class TrainConfig:
-    def __init__(self, save_dir, lr, max_epoch, metric_min_better=True, patience=3, grad_clip=None):
+    def __init__(self, save_dir, lr, max_epoch,
+                 metric_min_better=True, patience=3,
+                 grad_clip=None, save_topk=-1):  # -1 for not removing ckpt after topk
         self.save_dir = save_dir
         self.lr = lr
         self.max_epoch = max_epoch
         self.metric_min_better = metric_min_better
         self.patience = patience
         self.grad_clip = grad_clip
+        self.save_topk = save_topk
 
     def __str__(self):
         return str(self.__class__) + ': ' + str(self.__dict__)
@@ -63,6 +66,7 @@ class Trainer:
         self.valid_global_step = 0
         self.epoch = 0
         self.last_valid_metric = None
+        self.topk_ckpt_map = []  # smaller index means better ckpt
         self.patience = self.config.patience
 
     @classmethod
@@ -128,6 +132,7 @@ class Trainer:
                 save_path = os.path.join(self.model_dir, f'epoch{self.epoch}_step{self.global_step}.ckpt')
                 module_to_save = self.model.module if self.local_rank == 0 else self.model
                 torch.save(module_to_save, save_path)
+                self._maintain_topk_checkpoint(valid_metric, save_path)
         else:
             self.patience -= 1
         self.last_valid_metric = valid_metric
@@ -145,6 +150,32 @@ class Trainer:
             return new < old
         else:
             return old < new
+
+    def _maintain_topk_checkpoint(self, valid_metric, ckpt_path):
+        topk = self.config.save_topk
+        if self.config.metric_min_better:
+            better = lambda a, b: a < b
+        else:
+            better = lambda a, b: a > b
+        insert_pos = len(self.topk_ckpt_map)
+        for i, (metric, _) in enumerate(self.topk_ckpt_map):
+            if better(valid_metric, metric):
+                insert_pos = i
+                break
+        self.topk_ckpt_map.insert(insert_pos, (valid_metric, ckpt_path))
+
+        # maintain topk
+        if topk > 0:
+            while len(self.topk_ckpt_map) > topk:
+                last_ckpt_path = self.topk_ckpt_map[-1][1]
+                os.remove(last_ckpt_path)
+                self.topk_ckpt_map.pop()
+
+        # save map
+        topk_map_path = os.path.join(self.model_dir, 'topk_map.txt')
+        with open(topk_map_path, 'w') as fout:
+            for metric, path in self.topk_ckpt_map:
+                fout.write(f'{metric}: {path}\n')
 
     def train(self, device_ids, local_rank):
         # set local rank
