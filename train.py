@@ -22,7 +22,8 @@ setup_seed(SEED)
 class TrainConfig:
     def __init__(self, save_dir, lr, max_epoch,
                  metric_min_better=True, patience=3,
-                 grad_clip=None, save_topk=-1):  # -1 for not removing ckpt after topk
+                 grad_clip=None, save_topk=-1,  # -1 for not removing ckpt after topk
+                 **kwargs):
         self.save_dir = save_dir
         self.lr = lr
         self.max_epoch = max_epoch
@@ -30,6 +31,7 @@ class TrainConfig:
         self.patience = patience
         self.grad_clip = grad_clip
         self.save_topk = save_topk
+        self.__dict__.update(kwargs)
 
     def __str__(self):
         return str(self.__class__) + ': ' + str(self.__dict__)
