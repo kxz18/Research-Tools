@@ -1,15 +1,8 @@
 #!/usr/bin/python
 # -*- coding:utf-8 -*-
 import os
-import re
-import json
-from tqdm import tqdm
 import argparse
-from functools import partial
-
-import numpy as np
 import torch
-from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader
 
 from utils.logger import print_log
@@ -17,248 +10,28 @@ from utils.random_seed import setup_seed, SEED
 setup_seed(SEED)
 
 ########### Import your packages below ##########
-
-
-class TrainConfig:
-    def __init__(self, save_dir, lr, max_epoch,
-                 metric_min_better=True, patience=3,
-                 grad_clip=None, save_topk=-1,  # -1 for not removing ckpt after topk
-                 **kwargs):
-        self.save_dir = save_dir
-        self.lr = lr
-        self.max_epoch = max_epoch
-        self.metric_min_better = metric_min_better
-        self.patience = patience
-        self.grad_clip = grad_clip
-        self.save_topk = save_topk
-        self.__dict__.update(kwargs)
-
-    def __str__(self):
-        return str(self.__class__) + ': ' + str(self.__dict__)
-
-
-class Trainer:
-    def __init__(self, model, train_loader, valid_loader, config):
-        self.model = model
-        self.config = config
-        self.optimizer = self.get_optimizer()
-        sched_config = self.get_scheduler(self.optimizer)
-        if sched_config is None:
-            sched_config = {
-                'scheduler': None,
-                'frequency': None
-            }
-        self.scheduler = sched_config['scheduler']
-        self.sched_freq = sched_config['frequency']
-        self.train_loader = train_loader
-        self.valid_loader = valid_loader
-
-        # distributed training
-        self.local_rank = -1
-
-        # log
-        self.version = self._get_version()
-        self.config.save_dir = os.path.join(config.save_dir, f'version_{self.version}')
-        self.model_dir = os.path.join(self.config.save_dir, 'checkpoint')
-        self.writer = None  # initialize right before training
-        self.writer_buffer = {}
-
-        # training process recording
-        self.global_step = 0
-        self.valid_global_step = 0
-        self.epoch = 0
-        self.last_valid_metric = None
-        self.topk_ckpt_map = []  # smaller index means better ckpt
-        self.patience = self.config.patience
-
-    @classmethod
-    def to_device(cls, data, device):
-        if isinstance(data, dict):
-            for key in data:
-                data[key] = cls.to_device(data[key], device)
-        elif isinstance(data, list) or isinstance(data, tuple):
-            res = [cls.to_device(item, device) for item in data]
-            data = type(data)(res)
-        elif hasattr(data, 'to'):
-            data = data.to(device)
-        return data
-
-    def _is_main_proc(self):
-        return self.local_rank == 0 or self.local_rank == -1
-
-    def _get_version(self):
-        version, pattern = -1, r'version_(\d+)'
-        if os.path.exists(self.config.save_dir):
-            for fname in os.listdir(self.config.save_dir):
-                ver = re.findall(pattern, fname)
-                if len(ver):
-                    version = max(int(ver[0]), version)
-        return version + 1
-
-    def _train_epoch(self, device):
-        if self.train_loader.sampler is not None and self.local_rank != -1:  # distributed
-            self.train_loader.sampler.set_epoch(self.epoch)
-        t_iter = tqdm(self.train_loader) if self._is_main_proc() else self.train_loader
-        for batch in t_iter:
-            batch = self.to_device(batch, device)
-            loss = self.train_step(batch, self.global_step)
-            self.optimizer.zero_grad()
-            loss.backward()
-            if self.config.grad_clip is not None:
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.grad_clip)
-            self.optimizer.step()
-            if hasattr(t_iter, 'set_postfix'):
-                t_iter.set_postfix(loss=loss.item(), version=self.version)
-            self.global_step += 1
-            if self.sched_freq == 'batch':
-                self.scheduler.step()
-        if self.sched_freq == 'epoch':
-            self.scheduler.step()
-    
-    def _valid_epoch(self, device):
-        metric_arr = []
-        self.model.eval()
-        with torch.no_grad():
-            t_iter = tqdm(self.valid_loader) if self._is_main_proc() else self.valid_loader
-            for batch in t_iter:
-                batch = self.to_device(batch, device)
-                metric = self.valid_step(batch, self.valid_global_step)
-                metric_arr.append(metric.cpu().item())
-                self.valid_global_step += 1
-        self.model.train()
-        # judge
-        valid_metric = np.mean(metric_arr)
-        if self._metric_better(valid_metric):
-            self.patience = self.config.patience
-            if self._is_main_proc():
-                save_path = os.path.join(self.model_dir, f'epoch{self.epoch}_step{self.global_step}.ckpt')
-                module_to_save = self.model.module if self.local_rank == 0 else self.model
-                torch.save(module_to_save, save_path)
-                self._maintain_topk_checkpoint(valid_metric, save_path)
-        else:
-            self.patience -= 1
-        self.last_valid_metric = valid_metric
-        # write valid_metric
-        for name in self.writer_buffer:
-            value = np.mean(self.writer_buffer[name])
-            self.log(name, value, self.epoch)
-        self.writer_buffer = {}
-    
-    def _metric_better(self, new):
-        old = self.last_valid_metric
-        if old is None:
-            return True
-        if self.config.metric_min_better:
-            return new < old
-        else:
-            return old < new
-
-    def _maintain_topk_checkpoint(self, valid_metric, ckpt_path):
-        topk = self.config.save_topk
-        if self.config.metric_min_better:
-            better = lambda a, b: a < b
-        else:
-            better = lambda a, b: a > b
-        insert_pos = len(self.topk_ckpt_map)
-        for i, (metric, _) in enumerate(self.topk_ckpt_map):
-            if better(valid_metric, metric):
-                insert_pos = i
-                break
-        self.topk_ckpt_map.insert(insert_pos, (valid_metric, ckpt_path))
-
-        # maintain topk
-        if topk > 0:
-            while len(self.topk_ckpt_map) > topk:
-                last_ckpt_path = self.topk_ckpt_map[-1][1]
-                os.remove(last_ckpt_path)
-                self.topk_ckpt_map.pop()
-
-        # save map
-        topk_map_path = os.path.join(self.model_dir, 'topk_map.txt')
-        with open(topk_map_path, 'w') as fout:
-            for metric, path in self.topk_ckpt_map:
-                fout.write(f'{metric}: {path}\n')
-
-    def train(self, device_ids, local_rank):
-        # set local rank
-        self.local_rank = local_rank
-        # init writer
-        if self._is_main_proc():
-            self.writer = SummaryWriter(self.config.save_dir)
-            if not os.path.exists(self.model_dir):
-                os.makedirs(self.model_dir)
-            with open(os.path.join(self.config.save_dir, 'train_config.json'), 'w') as fout:
-                json.dump(self.config.__dict__, fout)
-        # main device
-        main_device_id = local_rank if local_rank != -1 else device_ids[0]
-        device = torch.device('cpu' if main_device_id == -1 else f'cuda:{main_device_id}')
-        self.model.to(device)
-        if local_rank != -1:
-            print_log(f'Using data parallel, local rank {local_rank}, all {device_ids}')
-            self.model = torch.nn.parallel.DistributedDataParallel(
-                self.model, device_ids=[local_rank], output_device=local_rank
-            )
-        else:
-            print_log(f'training on {device_ids}')
-        for _ in range(self.config.max_epoch):
-            print_log(f'epoch{self.epoch} starts') if self._is_main_proc() else 1
-            self._train_epoch(device)
-            print_log(f'validating ...') if self._is_main_proc() else 1
-            self._valid_epoch(device)
-            self.epoch += 1
-            if self.patience <= 0:
-                break
-
-    def log(self, name, value, step, val=False):
-        if self._is_main_proc():
-            if isinstance(value, torch.Tensor):
-                value = value.cpu().item()
-            if val:
-                if name not in self.writer_buffer:
-                    self.writer_buffer[name] = []
-                self.writer_buffer[name].append(value)
-            else:
-                self.writer.add_scalar(name, value, step)
-
-    ########## Overload these functions below ##########
-    # define optimizer
-    def get_optimizer(self):
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config.lr)
-        return optimizer
-
-    # scheduler example: linear. Return None if no scheduler is needed.
-    def get_scheduler(self, optimizer):
-        lam = lambda epoch: 1 / (epoch + 1)
-        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lam)
-        return {
-            'scheduler': scheduler,
-            'frequency': 'epoch' # or batch
-        }
-
-    # train step, note that batch should be dict/list/tuple/instance. Objects with .to(device) attribute will be automatically moved to the same device as the model
-    def train_step(self, batch, batch_idx):
-        loss = self.model(batch)
-        self.log('Loss/train', loss, batch_idx)
-        return loss
-
-    # validation step
-    def valid_step(self, batch, batch_idx):
-        loss = self.model(batch)
-        self.log('Loss/validation', loss, batch_idx, val=True)
-        return loss
+from data.dataset import ComplexDataset
+from trainer import TrainConfig, create_trainer
+from models import create_model
 
 
 def parse():
     parser = argparse.ArgumentParser(description='training')
+    # data
     parser.add_argument('--train_set', type=str, required=True, help='path to train set')
     parser.add_argument('--valid_set', type=str, required=True, help='path to valid set')
+    parser.add_argument('--pdb_dir', type=str, required=True, help='directory to the complex pdbs')
 
     # training related
     parser.add_argument('--lr', type=float, default=1e-3, help='learning rate')
+    parser.add_argument('--final_lr', type=float, default=1e-4, help='final learning rate')
+    parser.add_argument('--warmup', type=int, default=0, help='linear learning rate warmup')
     parser.add_argument('--max_epoch', type=int, default=10, help='max training epoch')
     parser.add_argument('--grad_clip', type=float, default=1.0, help='clip gradients with too big norm')
     parser.add_argument('--save_dir', type=str, required=True, help='directory to save model and logs')
     parser.add_argument('--batch_size', type=int, required=True, help='batch size')
+    parser.add_argument('--patience', type=int, default=3, help='patience before early stopping')
+    parser.add_argument('--save_topk', type=int, default=-1, help='save topk checkpoint. -1 for saving all ckpt that has a better validation metric than its previous epoch')
     parser.add_argument('--shuffle', action='store_true', help='shuffle data')
     parser.add_argument('--num_workers', type=int, default=8)
 
@@ -266,20 +39,37 @@ def parse():
     parser.add_argument('--gpus', type=int, nargs='+', required=True, help='gpu to use, -1 for cpu')
     parser.add_argument("--local_rank", type=int, default=-1,
                         help="Local rank. Necessary for using the torch.distributed.launch utility.")
+    
+    # model
+    parser.add_argument('--model_type', type=str, required=True, choices=['seq2seq'], help='type of model to use')
+    parser.add_argument('--embed_dim', type=int, default=64, help='dimension of residue/atom embedding')
+    parser.add_argument('--hidden_size', type=int, default=128, help='dimension of hidden states')
+    parser.add_argument('--k_neighbors', type=int, default=9, help='Number of neighbors in KNN graph')
+    parser.add_argument('--n_layers', type=int, default=3, help='Number of layers')
+    parser.add_argument('--iter_round', type=int, default=2, help='Number of rounds')
 
     return parser.parse_args()
 
 
 def main(args):
     ########### load your train / valid set ###########
-    train_set = None
-    valid_set = None
+    train_set = ComplexDataset(args.train_set, args.pdb_dir)
+    valid_set = ComplexDataset(args.valid_set, args.pdb_dir)
 
     ########## set your collate_fn ##########
-    collate_fn = None
+    collate_fn = train_set.collate_fn
 
-    ########## define your model #########
-    model = None
+    ########## define your model/trainer/trainconfig #########
+    step_per_epoch = (len(train_set) + args.batch_size - 1) // args.batch_size
+    config = TrainConfig(args.save_dir, args.lr, args.max_epoch,
+                         warmup=args.warmup,
+                         patience=args.patience,
+                         grad_clip=args.grad_clip,
+                         save_topk=args.save_topk)
+    config.add_parameter(step_per_epoch=step_per_epoch,
+                         final_lr=args.final_lr)
+
+    model = create_model(args)
 
     if len(args.gpus) > 1:
         args.local_rank = int(os.environ['LOCAL_RANK'])
@@ -300,8 +90,8 @@ def main(args):
     valid_loader = DataLoader(valid_set, batch_size=args.batch_size,
                               num_workers=args.num_workers,
                               collate_fn=collate_fn)
-    config = TrainConfig(args.save_dir, args.lr, args.max_epoch, grad_clip=args.grad_clip)
-    trainer = Trainer(model, train_loader, valid_loader, config)
+    
+    trainer = create_trainer(args.model_type, model, train_loader, valid_loader, config)
     trainer.train(args.gpus, args.local_rank)
 
 
