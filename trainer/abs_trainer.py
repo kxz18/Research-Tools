@@ -127,13 +127,13 @@ class Trainer:
         self.model.train()
         # judge
         valid_metric = np.mean(metric_arr)
+        if self._is_main_proc():
+            save_path = os.path.join(self.model_dir, f'epoch{self.epoch}_step{self.global_step}.ckpt')
+            module_to_save = self.model.module if self.local_rank == 0 else self.model
+            torch.save(module_to_save, save_path)
+            self._maintain_topk_checkpoint(valid_metric, save_path)
         if self._metric_better(valid_metric):
             self.patience = self.config.patience
-            if self._is_main_proc():
-                save_path = os.path.join(self.model_dir, f'epoch{self.epoch}_step{self.global_step}.ckpt')
-                module_to_save = self.model.module if self.local_rank == 0 else self.model
-                torch.save(module_to_save, save_path)
-                self._maintain_topk_checkpoint(valid_metric, save_path)
         else:
             self.patience -= 1
         self.last_valid_metric = valid_metric
