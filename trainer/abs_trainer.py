@@ -24,7 +24,7 @@ class TrainConfig:
         self.max_epoch = max_epoch
         self.warmup = warmup
         self.metric_min_better = metric_min_better
-        self.patience = patience
+        self.patience = patience if patience > 0 else max_epoch
         self.grad_clip = grad_clip
         self.save_topk = save_topk
         self.__dict__.update(kwargs)
