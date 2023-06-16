@@ -1,3 +1,4 @@
+#!/usr/bin/python
 # -*- coding:utf-8 -*-
 import numpy as np
 from sklearn.manifold import TSNE
