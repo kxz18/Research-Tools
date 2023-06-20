@@ -113,7 +113,11 @@ class Trainer:
                 self.scheduler.step()
         if self.sched_freq == 'epoch':
             self.scheduler.step()
+        self._train_epoch_end(device)
     
+    def _train_epoch_end(self, device):
+        return
+
     def _aggregate_val_metric(self, metric_arr):
         return np.mean(metric_arr)
 
@@ -127,7 +131,7 @@ class Trainer:
                 metric = self.valid_step(batch, self.valid_global_step)
                 metric_arr.append(metric.cpu().item())
                 self.valid_global_step += 1
-        self.model.train()
+        
         # judge
         valid_metric = self._aggregate_val_metric(metric_arr)
         if self._is_main_proc():
@@ -145,7 +149,12 @@ class Trainer:
             value = np.mean(self.writer_buffer[name])
             self.log(name, value, self.epoch)
         self.writer_buffer = {}
+        self._valid_epoch_end(device)
+        self.model.train()
     
+    def _valid_epoch_end(self, device):
+        return
+
     def _metric_better(self, new):
         old = self.last_valid_metric
         if old is None:
@@ -181,12 +190,16 @@ class Trainer:
             for metric, path in self.topk_ckpt_map:
                 fout.write(f'{metric}: {path}\n')
 
+    def _modify_writer(self):
+        return
+
     def train(self, device_ids, local_rank):
         # set local rank
         self.local_rank = local_rank
         # init writer
         if self._is_main_proc():
             self.writer = SummaryWriter(self.config.save_dir)
+            self._modify_writer()
             if not os.path.exists(self.model_dir):
                 os.makedirs(self.model_dir)
             with open(os.path.join(self.config.save_dir, 'train_config.json'), 'w') as fout:
