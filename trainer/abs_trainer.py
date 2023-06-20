@@ -114,6 +114,9 @@ class Trainer:
         if self.sched_freq == 'epoch':
             self.scheduler.step()
     
+    def _aggregate_val_metric(self, metric_arr):
+        return np.mean(metric_arr)
+
     def _valid_epoch(self, device):
         metric_arr = []
         self.model.eval()
@@ -126,7 +129,7 @@ class Trainer:
                 self.valid_global_step += 1
         self.model.train()
         # judge
-        valid_metric = np.mean(metric_arr)
+        valid_metric = self._aggregate_val_metric(metric_arr)
         if self._is_main_proc():
             save_path = os.path.join(self.model_dir, f'epoch{self.epoch}_step{self.global_step}.ckpt')
             module_to_save = self.model.module if self.local_rank == 0 else self.model
