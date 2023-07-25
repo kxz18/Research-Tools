@@ -4,12 +4,12 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 sns.set_theme()
 
+from .post_editor import post_edit
 
-def histplot(data, x, hue=None, density=False, save_path=None, **kwargs):
+
+def histplot(data, x, hue=None, density=False, post_edit_func=None, save_path=None, **kwargs):
     ax = sns.histplot(data=data, x=x, hue=hue, stat='density' if density else 'count', **kwargs)
-    if save_path is not None:
-        plt.savefig(save_path)
-        plt.clf()
+    post_edit(ax, post_edit_func, save_path)
     return ax
 
 

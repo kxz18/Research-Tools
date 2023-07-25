@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 sns.set_theme()
 
+from .post_editor import post_edit
+
 
 def interp_unsorted(x_array, y_array, kind='cubic', interp_num=1000):
     sort_idx = sorted([i for i in range(len(x_array))], key=lambda idx: x_array[idx])
@@ -16,7 +18,7 @@ def interp_unsorted(x_array, y_array, kind='cubic', interp_num=1000):
     return x_interp, y_interp
 
 
-def lineplot(data, x, y, hue=None, smooth=None, save_path=None, **kwargs):
+def lineplot(data, x, y, hue=None, smooth=None, post_edit_func=None, save_path=None, **kwargs):
     '''
     smooth method: quadratic, cubic
     '''
@@ -44,9 +46,7 @@ def lineplot(data, x, y, hue=None, smooth=None, save_path=None, **kwargs):
         data = new_data
 
     ax = sns.lineplot(data=data, x=x, y=y, hue=hue, **kwargs)
-    if save_path is not None:
-        plt.savefig(save_path)
-        plt.clf()
+    post_edit(ax, post_edit_func, save_path)
 
     return ax
 

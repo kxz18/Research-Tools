@@ -5,16 +5,16 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 sns.set_theme()
 
+from .post_editor import post_edit
 
-def heatmap(data, transpose=False, save_path=None, **kwargs):
+
+def heatmap(data, transpose=False, post_edit_func=None, save_path=None, **kwargs):
     if isinstance(data, list):
         data = np.array(data)
     if transpose:
         data = data.T
     ax = sns.heatmap(data)
-    if save_path is not None:
-        plt.savefig(save_path)
-        plt.clf()
+    post_edit(ax, post_edit_func, save_path)
     return ax
 
 
