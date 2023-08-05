@@ -13,7 +13,7 @@ def heatmap(data, transpose=False, post_edit_func=None, save_path=None, **kwargs
         data = np.array(data)
     if transpose:
         data = data.T
-    ax = sns.heatmap(data)
+    ax = sns.heatmap(data, **kwargs)
     post_edit(ax, post_edit_func, save_path)
     return ax
 
