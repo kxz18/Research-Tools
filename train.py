@@ -13,6 +13,7 @@ setup_seed(SEED)
 from data.dataset import ComplexDataset
 from trainer import TrainConfig, create_trainer
 from models import create_model
+from utils.nn_utils import count_parameters
 
 
 def parse():
@@ -30,6 +31,7 @@ def parse():
     parser.add_argument('--grad_clip', type=float, default=1.0, help='clip gradients with too big norm')
     parser.add_argument('--save_dir', type=str, required=True, help='directory to save model and logs')
     parser.add_argument('--batch_size', type=int, required=True, help='batch size')
+    parser.add_argument('--valid_batch_size', type=int, default=None, help='batch size of validation, default set to the same as training batch size')
     parser.add_argument('--patience', type=int, default=3, help='patience before early stopping')
     parser.add_argument('--save_topk', type=int, default=-1, help='save topk checkpoint. -1 for saving all ckpt that has a better validation metric than its previous epoch')
     parser.add_argument('--shuffle', action='store_true', help='shuffle data')
@@ -52,6 +54,10 @@ def parse():
 
 
 def main(args):
+
+    ########## define your model #########
+    model = create_model(args)
+
     ########### load your train / valid set ###########
     train_set = ComplexDataset(args.train_set, args.pdb_dir)
     valid_set = ComplexDataset(args.valid_set, args.pdb_dir)
@@ -59,7 +65,7 @@ def main(args):
     ########## set your collate_fn ##########
     collate_fn = train_set.collate_fn
 
-    ########## define your model/trainer/trainconfig #########
+    ########## define your trainer/trainconfig #########
     step_per_epoch = (len(train_set) + args.batch_size - 1) // args.batch_size
     config = TrainConfig(args.save_dir, args.lr, args.max_epoch,
                          warmup=args.warmup,
@@ -68,8 +74,8 @@ def main(args):
                          save_topk=args.save_topk)
     config.add_parameter(step_per_epoch=step_per_epoch,
                          final_lr=args.final_lr)
-
-    model = create_model(args)
+    if args.valid_batch_size is None:
+        args.valid_batch_size = args.batch_size
 
     if len(args.gpus) > 1:
         args.local_rank = int(os.environ['LOCAL_RANK'])
@@ -82,12 +88,16 @@ def main(args):
     else:
         args.local_rank = -1
         train_sampler = None
+
+    if args.local_rank <= 0:
+        print(f'Number of parameters: {count_parameters(model) / 1e6} M')
+    
     train_loader = DataLoader(train_set, batch_size=args.batch_size,
                               num_workers=args.num_workers,
                               shuffle=(args.shuffle and train_sampler is None),
                               sampler=train_sampler,
                               collate_fn=collate_fn)
-    valid_loader = DataLoader(valid_set, batch_size=args.batch_size,
+    valid_loader = DataLoader(valid_set, batch_size=args.valid_batch_size,
                               num_workers=args.num_workers,
                               collate_fn=collate_fn)
     

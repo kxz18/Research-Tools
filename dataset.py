@@ -54,7 +54,7 @@ class PersistentDataset(torch.utils.data.Dataset):
                 save_dir = os.path.split(file_path)[0]
             else:
                 save_dir = file_path
-            save_dir = os.path.join(save_dir, 'processed')
+            save_dir = os.path.join(save_dir, f'processed.pkl')
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
         metainfo_file = os.path.join(save_dir, '_metainfo')
