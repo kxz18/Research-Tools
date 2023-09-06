@@ -9,6 +9,7 @@ import numpy as np
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
+from utils.oom_decorator import OOMReturn
 from utils.logger import print_log
 
 ########### Import your packages below ##########
@@ -94,6 +95,9 @@ class Trainer:
                     version = max(int(ver[0]), version)
         return version + 1
 
+    def is_oom_return(self, value):
+        return isinstance(value, OOMReturn)
+
     def _train_epoch(self, device):
         if self.train_loader.sampler is not None and self.local_rank != -1:  # distributed
             self.train_loader.sampler.set_epoch(self.epoch)
@@ -101,6 +105,9 @@ class Trainer:
         for batch in t_iter:
             batch = self.to_device(batch, device)
             loss = self.train_step(batch, self.global_step)
+            if self.is_oom_return(loss):
+                print_log(f'Out of memory, local rank {self.local_rank}', level='WARN')
+                loss = loss.fake_loss
             self.optimizer.zero_grad()
             loss.backward()
             if self.config.grad_clip is not None:
