@@ -24,7 +24,6 @@ if [ -z $1 ]; then
     echo "Config missing. Usage example: GPU=0,1 bash $0 <config>"
     exit 1;
 fi
-CONFIG=`cat $1 | python -c "import sys, json; config = json.load(sys.stdin); print(\" \".join([f'--{key}' + (f' {config[key]}' if type(config[key])!=bool else '') for key in config if config[key]]))"`
 
 
 ########## setup  distributed training ##########
@@ -47,4 +46,4 @@ fi
 
 ########## start training ##########
 cd $CODE_DIR
-${PREFIX} train.py --gpu "${!GPU_ARR[@]}" ${CONFIG}
+${PREFIX} train.py --gpu "${!GPU_ARR[@]}" --config $1
