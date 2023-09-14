@@ -256,6 +256,8 @@ class Trainer:
 
     # scheduler example: linear. Return None if no scheduler is needed.
     def get_scheduler(self, optimizer):
+        if not hasattr(self.config, 'scheduler'):
+            return None
         sched_cfg = deepcopy(self.config.scheduler)
         cls = getattr(torch.optim.lr_scheduler, sched_cfg.pop('class'))
         freq = sched_cfg.pop('frequency')
