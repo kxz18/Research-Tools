@@ -2,7 +2,8 @@
 # -*- coding:utf-8 -*-
 import os
 import re
-import json
+import yaml
+from copy import deepcopy
 from tqdm import tqdm
 
 import numpy as np
@@ -16,13 +17,16 @@ from utils.logger import print_log
 
 
 class TrainConfig:
-    def __init__(self, save_dir, lr, max_epoch, warmup=0,
-                 metric_min_better=True, patience=3,
+    def __init__(self, save_dir, lr, max_epoch,
+                 optimizer, scheduler,  # both are dict configure
+                 warmup=0, metric_min_better=True, patience=3,
                  grad_clip=None, save_topk=-1,  # -1 for save all
                  **kwargs):
         self.save_dir = save_dir
         self.lr = lr
         self.max_epoch = max_epoch
+        self.optimizer = optimizer
+        self.scheduler = scheduler
         self.warmup = warmup
         self.metric_min_better = metric_min_better
         self.patience = patience if patience > 0 else max_epoch
@@ -38,9 +42,10 @@ class TrainConfig:
 
 
 class Trainer:
-    def __init__(self, model, train_loader, valid_loader, config):
+    def __init__(self, model, train_loader, valid_loader, config: dict, save_config: dict):
         self.model = model
-        self.config = config
+        self.config = TrainConfig(**config)
+        self.save_config = save_config
         self.optimizer = self.get_optimizer()
         sched_config = self.get_scheduler(self.optimizer)
         if sched_config is None:
@@ -209,8 +214,8 @@ class Trainer:
             self._modify_writer()
             if not os.path.exists(self.model_dir):
                 os.makedirs(self.model_dir)
-            with open(os.path.join(self.config.save_dir, 'train_config.json'), 'w') as fout:
-                json.dump(self.config.__dict__, fout)
+            with open(os.path.join(self.config.save_dir, 'train_config.yaml'), 'w') as fout:
+                yaml.safe_dump(self.save_config, fout)
         # main device
         main_device_id = local_rank if local_rank != -1 else device_ids[0]
         device = torch.device('cpu' if main_device_id == -1 else f'cuda:{main_device_id}')
@@ -242,21 +247,24 @@ class Trainer:
             else:
                 self.writer.add_scalar(name, value, step)
 
-    ########## Overload these functions below ##########
     # define optimizer
     def get_optimizer(self):
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config.lr)
+        opt_cfg = deepcopy(self.config.optimizer)
+        cls = getattr(torch.optim, opt_cfg.pop('class'))
+        optimizer = cls(self.model.parameters(), **opt_cfg)
         return optimizer
 
     # scheduler example: linear. Return None if no scheduler is needed.
     def get_scheduler(self, optimizer):
-        lam = lambda epoch: 1 / (epoch + 1)
-        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lam)
+        sched_cfg = deepcopy(self.config.scheduler)
+        cls = getattr(torch.optim.lr_scheduler, sched_cfg.pop('class'))
+        freq = sched_cfg.pop('frequency')
         return {
-            'scheduler': scheduler,
-            'frequency': 'epoch' # or batch
+            'scheduler': cls(optimizer, **sched_cfg),
+            'frequency': freq # batch/epoch/val_epoch
         }
 
+    ########## Overload these functions below ##########
     # train step, note that batch should be dict/list/tuple/instance. Objects with .to(device) attribute will be automatically moved to the same device as the model
     def train_step(self, batch, batch_idx):
         loss = self.model(batch)

@@ -1,14 +1,15 @@
 #!/usr/bin/python
 # -*- coding:utf-8 -*-
-from .abs_trainer import TrainConfig
-from .Seq2Seq_trainer import Seq2SeqTrainer
 
 
-def create_trainer(model_type, model, train_loader, valid_loader, config):
-    if model_type == 'seq2seq':
-        Trainer = Seq2SeqTrainer
-    else:
-        raise NotImplementedError(f'Trainer for model type {model_type} not implemented!')
-    return Trainer(model, train_loader, valid_loader, config)
+import utils.register as R
+
+def create_trainer(config, model, train_loader, valid_loader):
+    return R.construct(
+        config['trainer'],
+        model=model,
+        train_loader=train_loader,
+        valid_loader=valid_loader,
+        save_config=config)
 
 

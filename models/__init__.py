@@ -1,12 +1,7 @@
 #!/usr/bin/python
 # -*- coding:utf-8 -*-
-from .Seq2Seq.model import Seq2Seq
-from .pepdesign import PepDesign
 
+import utils.register as R
 
-def create_model(args):
-    model_type = args.model_type
-    if model_type == 'seq2seq':
-        return Seq2Seq(hidden_size=args.hidden_size, depth=args.n_layers)
-    else:
-        raise NotImplementedError(f'Model type {model_type} not implemented!')
+def create_model(config: dict, **kwargs):
+    return R.construct(config, **kwargs)
