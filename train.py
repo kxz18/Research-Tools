@@ -8,6 +8,7 @@ import torch
 
 from utils.logger import print_log
 from utils.random_seed import setup_seed, SEED
+from utils.config_utils import overwrite_values
 
 ########### Import your packages below ##########
 from models import create_model
@@ -28,13 +29,14 @@ def parse():
     parser.add_argument('--config', type=str, required=True, help='Path to the yaml configure')
     parser.add_argument('--seed', type=int, default=SEED, help='Random seed')
 
-    return parser.parse_args()
+    return parser.parse_known_args()
 
 
-def main(args):
+def main(args, opt_args):
 
     # load config
     config = yaml.safe_load(open(args.config, 'r'))
+    config = overwrite_values(config, opt_args)
 
     ########## define your model #########
     model = create_model(config['model'])
@@ -61,6 +63,7 @@ def main(args):
 
 
 if __name__ == '__main__':
-    args = parse()
+    args, opt_args = parse()
+    print(opt_args)
     setup_seed(args.seed)
-    main(args)
+    main(args, opt_args)

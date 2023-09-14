@@ -19,9 +19,9 @@ CODE_DIR=`realpath $(dirname "$0")/../..`
 echo "Locate the project folder at ${CODE_DIR}"
 
 
-########## parsing JSON configs ##########
+########## parsing yaml configs ##########
 if [ -z $1 ]; then
-    echo "Config missing. Usage example: GPU=0,1 bash $0 <config>"
+    echo "Config missing. Usage example: GPU=0,1 bash $0 <config> [optional arguments]"
     exit 1;
 fi
 
@@ -46,4 +46,4 @@ fi
 
 ########## start training ##########
 cd $CODE_DIR
-${PREFIX} train.py --gpu "${!GPU_ARR[@]}" --config $1
+${PREFIX} train.py --gpu "${!GPU_ARR[@]}" --config $@
