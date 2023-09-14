@@ -16,9 +16,11 @@ def oom_decorator(forward):
         try:
             output = forward(self, *args, **kwargs)
             return output
-        except torch.cuda.OutOfMemoryError:
-            output = sum([p.norm() for p in self.parameters()]) * 0.0
-            return OOMReturn(output)
-    
+        except RuntimeError as e:
+            if 'out of memory' in str(e):
+                output = sum([p.norm() for p in self.parameters()]) * 0.0
+                return OOMReturn(output)
+            else:
+                raise e
     return deco_func
 
