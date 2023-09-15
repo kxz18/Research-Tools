@@ -38,6 +38,16 @@ def _find_measure_unit(num_bytes):
     return size, measure_unit
 
 
+def _prop_to_str(properties: list):
+    prop_s = []
+    for prop in properties:
+        if isinstance(prop, list) or isinstance(prop, dict):
+            prop_s.append(json.dumps(prop))
+        else:
+            prop_s.append(str(prop))
+    return prop_s
+
+
 def create_mmap(iterator, out_dir, total_len=None, commit_batch=10000):
     
     if not os.path.exists(out_dir):
@@ -53,7 +63,7 @@ def create_mmap(iterator, out_dir, total_len=None, commit_batch=10000):
         progress_bar.set_description(f'Processing {_id}')
         compressed_x = compress(x)
         bin_length = data_file.write(compressed_x)
-        properties = '\t'.join([str(prop) for prop in properties])
+        properties = '\t'.join(_prop_to_str(properties))
         index_file.write(f'{_id}\t{offset}\t{offset + bin_length}\t{properties}\n') # tuple of (_id, start, end), data slice is [start, end)
         offset += bin_length
         i += 1
