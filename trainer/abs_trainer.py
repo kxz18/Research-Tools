@@ -236,14 +236,14 @@ class Trainer:
             if self.patience <= 0:
                 break
 
-    def log(self, name, value, step, val=False):
+    def log(self, name, value, step, val=False, batch_size=1):
         if self._is_main_proc():
             if isinstance(value, torch.Tensor):
                 value = value.cpu().item()
             if val:
                 if name not in self.writer_buffer:
                     self.writer_buffer[name] = []
-                self.writer_buffer[name].append(value)
+                self.writer_buffer[name].extend([value] * batch_size)
             else:
                 self.writer.add_scalar(name, value, step)
 
