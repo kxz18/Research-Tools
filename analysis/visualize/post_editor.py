@@ -6,7 +6,7 @@ def post_edit(ax, func=None, save_path=None):
         func(ax)
 
     if save_path is not None:
-        plt.savefig(save_path)
+        plt.savefig(save_path, dpi=600)
         plt.clf()
 
     return ax
