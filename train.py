@@ -9,9 +9,9 @@ import torch
 from utils.logger import print_log
 from utils.random_seed import setup_seed, SEED
 from utils.config_utils import overwrite_values
+from utils import register as R
 
 ########### Import your packages below ##########
-from models import create_model
 from trainer import create_trainer
 from data import create_dataset, create_dataloader
 from utils.nn_utils import count_parameters
@@ -39,7 +39,7 @@ def main(args, opt_args):
     config = overwrite_values(config, opt_args)
 
     ########## define your model #########
-    model = create_model(config['model'])
+    model = R.construct(config['model'])
 
     ########### load your train / valid set ###########
     train_set, valid_set, _ = create_dataset(config['dataset'])
@@ -64,6 +64,6 @@ def main(args, opt_args):
 
 if __name__ == '__main__':
     args, opt_args = parse()
-    print(opt_args)
+    print_log(f'Overwritting args: {opt_args}')
     setup_seed(args.seed)
     main(args, opt_args)

@@ -17,21 +17,19 @@ from utils.logger import print_log
 
 
 class TrainConfig:
-    def __init__(self, save_dir, lr, max_epoch,
-                 optimizer, scheduler,  # both are dict configure
-                 warmup=0, metric_min_better=True, patience=3,
+    def __init__(self, save_dir, max_epoch, warmup=0,
+                 metric_min_better=True, patience=3,
                  grad_clip=None, save_topk=-1,  # -1 for save all
+                 grad_interval=1,  # parameter update interval
                  **kwargs):
         self.save_dir = save_dir
-        self.lr = lr
         self.max_epoch = max_epoch
-        self.optimizer = optimizer
-        self.scheduler = scheduler
         self.warmup = warmup
         self.metric_min_better = metric_min_better
         self.patience = patience if patience > 0 else max_epoch
         self.grad_clip = grad_clip
         self.save_topk = save_topk
+        self.grad_interval = grad_interval
         self.__dict__.update(kwargs)
 
     def add_parameter(self, **kwargs):
