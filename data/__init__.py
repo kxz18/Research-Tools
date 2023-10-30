@@ -18,7 +18,7 @@ def create_dataset(config: dict):
             continue
         if isinstance(split_config, list):
             dataset = MixDatasetWrapper(
-                [R.construct(cfg) for cfg in split_config]
+                *[R.construct(cfg) for cfg in split_config]
             )
         else:
             dataset = R.construct(split_config)
