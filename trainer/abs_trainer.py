@@ -10,7 +10,7 @@ import numpy as np
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
-from utils.oom_decorator import OOMReturn
+from utils.oom_decorator import OOMReturn, safe_backward
 from utils.logger import print_log
 
 ########### Import your packages below ##########
@@ -21,6 +21,7 @@ class TrainConfig:
                  metric_min_better=True, patience=3,
                  grad_clip=None, save_topk=-1,  # -1 for save all
                  grad_interval=1,  # parameter update interval
+                 val_freq=1,       # frequence for validation
                  **kwargs):
         self.save_dir = save_dir
         self.max_epoch = max_epoch
@@ -30,6 +31,7 @@ class TrainConfig:
         self.grad_clip = grad_clip
         self.save_topk = save_topk
         self.grad_interval = grad_interval
+        self.val_freq = val_freq
         self.__dict__.update(kwargs)
 
     def add_parameter(self, **kwargs):
@@ -111,10 +113,18 @@ class Trainer:
             if self.is_oom_return(loss):
                 print_log(f'Out of memory, local rank {self.local_rank}', level='WARN')
                 loss = loss.fake_loss
+            elif torch.isnan(loss):
+                print_log(f'Loss is nan, local_rank {self.local_rank}', level='WARN')
+                loss = sum([p.norm() for p in self.model.parameters() if p.dtype == torch.float]) * 0.0
             self.optimizer.zero_grad()
-            loss.backward()
+            backward_ok = safe_backward(loss, self.model)
+            if not backward_ok:
+                print_log(f'Backward out of memory, skip', level='WARN')
+                loss = loss.detach() # manually delete the computing graph
             if self.config.grad_clip is not None:
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.grad_clip)
+                ori_grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.grad_clip)
+                # recording gradients
+                self.log('Grad Norm', ori_grad_norm.cpu(), self.global_step)
             self.optimizer.step()
             if hasattr(t_iter, 'set_postfix'):
                 t_iter.set_postfix(loss=loss.item(), version=self.version)
@@ -149,6 +159,7 @@ class Trainer:
             module_to_save = self.model.module if self.local_rank == 0 else self.model
             torch.save(module_to_save, save_path)
             self._maintain_topk_checkpoint(valid_metric, save_path)
+            print_log(f'Validation: {valid_metric}, save path: {save_path}')
         if self._metric_better(valid_metric):
             self.patience = self.config.patience
         else:
@@ -157,6 +168,8 @@ class Trainer:
         # write valid_metric
         for name in self.writer_buffer:
             value = np.mean(self.writer_buffer[name])
+            if self._is_main_proc():
+                print_log(f'{name}: {value}')
             self.log(name, value, self.epoch)
         self.writer_buffer = {}
         self._valid_epoch_end(device)
@@ -228,8 +241,9 @@ class Trainer:
         for _ in range(self.config.max_epoch):
             print_log(f'epoch{self.epoch} starts') if self._is_main_proc() else 1
             self._train_epoch(device)
-            print_log(f'validating ...') if self._is_main_proc() else 1
-            self._valid_epoch(device)
+            if (self.epoch + 1) % self.config.val_freq == 0:
+                print_log(f'validating ...') if self._is_main_proc() else 1
+                self._valid_epoch(device)
             self.epoch += 1
             if self.patience <= 0:
                 break
