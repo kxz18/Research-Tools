@@ -5,6 +5,7 @@ import io
 import gzip
 import json
 import mmap
+from typing import Optional
 from tqdm import tqdm
 
 import torch
@@ -38,16 +39,6 @@ def _find_measure_unit(num_bytes):
     return size, measure_unit
 
 
-def _prop_to_str(properties: list):
-    prop_s = []
-    for prop in properties:
-        if isinstance(prop, list) or isinstance(prop, dict):
-            prop_s.append(json.dumps(prop))
-        else:
-            prop_s.append(str(prop))
-    return prop_s
-
-
 def create_mmap(iterator, out_dir, total_len=None, commit_batch=10000):
     
     if not os.path.exists(out_dir):
@@ -59,22 +50,22 @@ def create_mmap(iterator, out_dir, total_len=None, commit_batch=10000):
 
     i, offset, n_finished = 0, 0, 0
     progress_bar = tqdm(iterator, total=total_len)
-    for _id, x, properties, finish_one in iterator:
+    for _id, x, properties, entry_idx in iterator:
         progress_bar.set_description(f'Processing {_id}')
         compressed_x = compress(x)
         bin_length = data_file.write(compressed_x)
-        properties = '\t'.join(_prop_to_str(properties))
+        properties = '\t'.join([str(prop) for prop in properties])
         index_file.write(f'{_id}\t{offset}\t{offset + bin_length}\t{properties}\n') # tuple of (_id, start, end), data slice is [start, end)
         offset += bin_length
         i += 1
 
-        if finish_one:
-            n_finished += 1
-            progress_bar.update(1)
+        if entry_idx > n_finished:
+            progress_bar.update(entry_idx - n_finished)
+            n_finished = entry_idx
             if total_len is not None:
                 expected_size = os.fstat(data_file.fileno()).st_size / n_finished * total_len
                 expected_size, measure_unit = _find_measure_unit(expected_size)
-                progress_bar.set_postfix({f'Estimated size ({measure_unit})': expected_size})
+                progress_bar.set_postfix({f'{i} saved; Estimated total size ({measure_unit})': expected_size})
 
         if i % commit_batch == 0:
             data_file.flush()  # save from memory to disk
@@ -87,19 +78,21 @@ def create_mmap(iterator, out_dir, total_len=None, commit_batch=10000):
 
 class MMAPDataset(torch.utils.data.Dataset):
     
-    def __init__(self, mmap_dir: str) -> None:
+    def __init__(self, mmap_dir: str, specify_data: Optional[str]=None, specify_index: Optional[str]=None) -> None:
         super().__init__()
 
         self._indexes = []
         self._properties = []
-        with open(os.path.join(mmap_dir, 'index.txt'), 'r') as f:
+        _index_path = os.path.join(mmap_dir, 'index.txt') if specify_index is None else specify_index
+        with open(_index_path, 'r') as f:
             for line in f.readlines():
                 messages = line.strip().split('\t')
                 _id, start, end = messages[:3]
                 _property = messages[3:]
                 self._indexes.append((_id, int(start), int(end)))
                 self._properties.append(_property)
-        self._data_file = open(os.path.join(mmap_dir, 'data.bin'), 'rb')
+        _data_path = os.path.join(mmap_dir, 'data.bin') if specify_data is None else specify_data
+        self._data_file = open(_data_path, 'rb')
         self._mmap = mmap.mmap(self._data_file.fileno(), 0, access=mmap.ACCESS_READ)
     
     def __del__(self):
