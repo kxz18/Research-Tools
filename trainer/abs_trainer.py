@@ -141,9 +141,13 @@ class Trainer:
     def _aggregate_val_metric(self, metric_arr):
         return np.mean(metric_arr)
 
+    def _valid_epoch_begin(self, device):
+        return
+
     def _valid_epoch(self, device):
         metric_arr = []
         self.model.eval()
+        self._valid_epoch_begin(device)
         with torch.no_grad():
             t_iter = tqdm(self.valid_loader) if self._is_main_proc() else self.valid_loader
             for batch in t_iter:
