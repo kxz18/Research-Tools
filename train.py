@@ -15,6 +15,7 @@ from utils import register as R
 from trainer import create_trainer
 from data import create_dataset, create_dataloader
 from utils.nn_utils import count_parameters
+import models
 
 
 def parse():
