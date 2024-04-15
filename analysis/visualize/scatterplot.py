@@ -9,18 +9,23 @@ sns.set_theme()
 from .post_editor import post_edit
 
 
-def high_dim_scatterplot(data, vec, x='dim1', y='dim2', hue=None, post_edit_func=None, save_path=None, **kwargs):
+def high_dim_scatterplot(data, vec, x='dim1', y='dim2', hue=None, labels=None, post_edit_func=None, save_path=None, **kwargs):
     # dimension reduce with T-SNE
     X = TSNE(n_components=2, perplexity=min(30, len(data[vec]))).fit_transform(np.array(data[vec]))  # [N, 2]
     reduced_data = {key: data[key] for key in data if key != vec}
     reduced_data[x], reduced_data[y] = X[:, 0], X[:, 1]
 
     # draw scatterplot
-    return scatterplot(reduced_data, x, y, hue, post_edit_func, save_path, **kwargs)
+    return scatterplot(reduced_data, x, y, hue, labels, post_edit_func, save_path, **kwargs)
 
 
-def scatterplot(data, x, y, hue=None, post_edit_func=None, save_path=None, **kwargs):
+def scatterplot(data, x, y, hue=None, labels=None, post_edit_func=None, save_path=None, **kwargs):
     ax = sns.scatterplot(data=data, x=x, y=y, hue=hue, **kwargs)
+    if labels is not None:
+        for i, label in enumerate(labels):
+            if label is None:
+                continue
+            ax.text(data[x][i], data[y][i], str(label), fontweight='bold')
     post_edit(ax, post_edit_func, save_path)
     return ax
 
