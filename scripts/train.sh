@@ -15,7 +15,7 @@
 
 
 ########## setup project directory ##########
-CODE_DIR=`realpath $(dirname "$0")/../..`
+CODE_DIR=`realpath $(dirname "$0")/..`
 echo "Locate the project folder at ${CODE_DIR}"
 
 
