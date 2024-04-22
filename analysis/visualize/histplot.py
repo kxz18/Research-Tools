@@ -7,8 +7,14 @@ sns.set_theme()
 from .post_editor import post_edit
 
 
-def histplot(data, x, hue=None, density=False, post_edit_func=None, save_path=None, **kwargs):
-    ax = sns.histplot(data=data, x=x, hue=hue, stat='density' if density else 'count', **kwargs)
+def histplot(data, x, hue=None, density=False, post_edit_func=None, save_path=None, order=None, **kwargs):
+    stat = kwargs.pop('stat', 'density' if density else 'count')
+    if order is not None:
+        idx = range(len(data[x]))
+        idx = sorted(idx, key=lambda i: order.index(data[x][i]))
+        for key in data:
+            data[key] = [data[key][i] for i in idx]
+    ax = sns.histplot(data=data, x=x, hue=hue, stat=stat, **kwargs)
     post_edit(ax, post_edit_func, save_path)
     return ax
 
