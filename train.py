@@ -56,8 +56,8 @@ def main(args, opt_args):
     if args.local_rank <= 0:
         print_log(f'Number of parameters: {count_parameters(model) / 1e6} M')
     
-    train_loader = create_dataloader(train_set, config['dataloader'], len(args.gpus))
-    valid_loader = create_dataloader(valid_set, config['dataloader'])
+    train_loader = create_dataloader(train_set, config['dataloader'].get('train', config['dataloader']), len(args.gpus))
+    valid_loader = create_dataloader(valid_set, config['dataloader'].get('valid', config['dataloader']))
     
     trainer = create_trainer(config, model, train_loader, valid_loader)
     trainer.train(args.gpus, args.local_rank)
