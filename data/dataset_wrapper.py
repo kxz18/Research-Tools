@@ -3,6 +3,9 @@ from tqdm import tqdm
 
 import numpy as np
 import torch
+import sympy
+
+from utils import register as R
 
 
 class MixDatasetWrapper(torch.utils.data.Dataset):
@@ -15,6 +18,18 @@ class MixDatasetWrapper(torch.utils.data.Dataset):
             self.total_len += len(dataset)
             self.cum_len.append(self.total_len)
         self.collate_fn = self.datasets[0].collate_fn if collate_fn is None else collate_fn
+        if hasattr(datasets[0], '_lengths'):
+            self._lengths = []
+            for dataset in datasets:
+                self._lengths.extend(dataset._lengths)
+    
+    def update_epoch(self):
+        for dataset in self.datasets:
+            if hasattr(dataset, 'update_epoch'):
+                dataset.update_epoch()
+
+    def get_len(self, idx):
+        return self._lengths[idx]
 
     def __len__(self):
         return self.total_len
@@ -25,15 +40,18 @@ class MixDatasetWrapper(torch.utils.data.Dataset):
             if idx < cum_len:
                 return self.datasets[i].__getitem__(idx - last_cum_len)
             last_cum_len = cum_len
-        return None
+        return None # this is not possible
     
 
+@R.register('DynamicBatchWrapper')
 class DynamicBatchWrapper(torch.utils.data.Dataset):
-    def __init__(self, dataset, max_n_vertex_per_batch) -> None:
+    def __init__(self, dataset, complexity, ubound_per_batch) -> None:
         super().__init__()
         self.dataset = dataset
         self.indexes = [i for i in range(len(dataset))]
-        self.max_n_vertex_per_batch = max_n_vertex_per_batch
+        self.complexity = complexity
+        self.eval_func = sympy.lambdify('n', sympy.simplify(complexity))
+        self.ubound_per_batch = ubound_per_batch
         self.total_size = None
         self.batch_indexes = []
         self._form_batch()
@@ -46,6 +64,11 @@ class DynamicBatchWrapper(torch.utils.data.Dataset):
         else:
             raise AttributeError(f"'DynamicBatchWrapper'(or '{type(self.dataset)}') object has no attribute '{attr}'")
 
+    def update_epoch(self):
+        if hasattr(self.dataset, 'update_epoch'):
+            self.dataset.update_epoch()
+        self._form_batch()
+
     ########## overload with your criterion ##########
     def _form_batch(self):
 
@@ -53,18 +76,18 @@ class DynamicBatchWrapper(torch.utils.data.Dataset):
         last_batch_indexes = self.batch_indexes
         self.batch_indexes = []
 
-        cur_vertex_cnt = 0
+        cur_complexity = 0
         batch = []
 
         for i in tqdm(self.indexes):
-            item_len = self.dataset._lengths[i]
-            if item_len > self.max_n_vertex_per_batch:
+            item_len = self.eval_func(self.dataset.get_len(i))
+            if item_len > self.ubound_per_batch:
                 continue
-            cur_vertex_cnt += item_len
-            if cur_vertex_cnt > self.max_n_vertex_per_batch:
+            cur_complexity += item_len
+            if cur_complexity > self.ubound_per_batch:
                 self.batch_indexes.append(batch)
                 batch = []
-                cur_vertex_cnt = item_len
+                cur_complexity = item_len
             batch.append(i)
         self.batch_indexes.append(batch)
 

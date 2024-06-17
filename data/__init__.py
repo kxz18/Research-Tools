@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # -*- coding:utf-8 -*-
 from .dataset_wrapper import MixDatasetWrapper
-
+from .molecule import MoleculeDataset
 
 import torch
 from torch.utils.data import DataLoader
@@ -27,7 +27,9 @@ def create_dataset(config: dict):
 
 
 def create_dataloader(dataset, config: dict, n_gpu: int=1):
-    batch_size = config['batch_size']
+    if 'wrapper' in config:
+        dataset = R.construct(config['wrapper'], dataset=dataset)
+    batch_size = config.get('batch_size', n_gpu) # default 1 on each gpu
     shuffle = config.get('shuffle', False)
     num_workers = config.get('num_workers', 4)
     collate_fn = dataset.collate_fn if hasattr(dataset, 'collate_fn') else None
