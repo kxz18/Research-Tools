@@ -6,6 +6,7 @@ import yaml
 from copy import deepcopy
 from tqdm import tqdm
 
+import wandb # for users preferring wandb over tensorboard
 import numpy as np
 import torch
 from torch.utils.tensorboard import SummaryWriter
@@ -225,7 +226,19 @@ class Trainer:
         self.local_rank = local_rank
         # init writer
         if self._is_main_proc():
-            self.writer = SummaryWriter(self.config.save_dir)
+            if wandb.api.api_key is None:
+                print_log(f'Using tensorboard to record the training procedure')
+                self.writer = SummaryWriter(self.config.save_dir) # using tensorboard
+            else:
+                print_log(f'Using wandb to record the training procedure')
+                assert hasattr(self.config, 'proj_name'), 'proj_name must be specified in trainer.config for using wandb'
+                wandb.init(
+                    project=self.config.proj_name,
+                    group=self.config.save_dir.rstrip(os.path.sep).split(os.path.sep)[-2],
+                    name=self.config.save_dir.rstrip(os.path.sep).split(os.path.sep)[-1],
+                    config=self.save_config
+                )
+                self.writer = None  # using wandb.log 
             self._modify_writer()
             if not os.path.exists(self.model_dir):
                 os.makedirs(self.model_dir)
@@ -261,7 +274,8 @@ class Trainer:
                     self.writer_buffer[name] = []
                 self.writer_buffer[name].extend([value] * batch_size)
             else:
-                self.writer.add_scalar(name, value, step)
+                if self.writer is None: wandb.log({ name: value })    # wandb
+                else: self.writer.add_scalar(name, value, step)         # tensorboard
 
     # define optimizer
     def get_optimizer(self):
