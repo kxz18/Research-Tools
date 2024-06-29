@@ -23,6 +23,7 @@ class TrainConfig:
                  grad_clip=None, save_topk=-1,  # -1 for save all
                  grad_interval=1,  # parameter update interval
                  val_freq=1,       # frequence for validation
+                 logger=None,
                  **kwargs):
         self.save_dir = save_dir
         self.max_epoch = max_epoch
@@ -33,6 +34,7 @@ class TrainConfig:
         self.save_topk = save_topk
         self.grad_interval = grad_interval
         self.val_freq = val_freq
+        self.logger = logger
         self.__dict__.update(kwargs)
 
     def add_parameter(self, **kwargs):
@@ -175,7 +177,8 @@ class Trainer:
             value = np.mean(self.writer_buffer[name])
             if self._is_main_proc():
                 print_log(f'{name}: {value}')
-            self.log(name, value, self.epoch)
+            # writer is None => using wandb => using global step (avoid overwritting)
+            self.log(name, value, self.global_step if self.writer is None else self.epoch)
         self.writer_buffer = {}
         self._valid_epoch_end(device)
         self.model.train()
@@ -226,7 +229,7 @@ class Trainer:
         self.local_rank = local_rank
         # init writer
         if self._is_main_proc():
-            if wandb.api.api_key is None:
+            if wandb.api.api_key is None or self.config.logger == 'tensorboard':
                 print_log(f'Using tensorboard to record the training procedure')
                 self.writer = SummaryWriter(self.config.save_dir) # using tensorboard
             else:
@@ -274,7 +277,7 @@ class Trainer:
                     self.writer_buffer[name] = []
                 self.writer_buffer[name].extend([value] * batch_size)
             else:
-                if self.writer is None: wandb.log({ name: value })    # wandb
+                if self.writer is None: wandb.log({ name: value }, step=step)    # wandb
                 else: self.writer.add_scalar(name, value, step)         # tensorboard
 
     # define optimizer
