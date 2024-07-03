@@ -588,6 +588,13 @@ periodic_table = [ # Periodic Table
     'Lv', 'Ts', 'Og'
 ]
 
+# bases for RNA/DNA
+bases = [
+    ('DA', 'DA'), ('DG', 'DG'), ('DC', 'DC'), ('DT', 'DT'), # DNA
+    ('RA', 'RA'), ('RG', 'RG'), ('RC', 'RC'), ('RU', 'RU')  # RNA
+]
+
+
 # amino acids
 aas = [
     ('G', 'GLY'), ('A', 'ALA'), ('V', 'VAL'), ('L', 'LEU'),
