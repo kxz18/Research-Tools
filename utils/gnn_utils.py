@@ -87,6 +87,21 @@ def variadic_meshgrid(input1, size1, input2, size2):
     return input1[index1], input2[index2]
 
 
+def std_conserve_scatter_mean(src, index, dim):
+    '''
+    std conserving scatter mean
+    suppose n variables from N(0, sigma^2)
+    the sum of the n variables results in N(0, n*sigma^2)
+    if directly use mean pooling, the result will be N(0, (1/n)sigma^2)
+    this function divides the results by sqrt(n), which leads to N(0, sigma^2) again
+    '''
+    ones = torch.ones_like(index)
+    n = scatter_sum(ones, index, dim=0) # [N]
+    value = scatter_sum(src, index, dim=dim) # [N, ...]
+    value = value / torch.sqrt(n).unsqueeze(-1)
+    return value
+
+
 def scatter_sort(src: torch.Tensor, index: torch.Tensor, dim=0, descending=False, eps=1e-12):
     '''
     from https://github.com/rusty1s/pytorch_scatter/issues/48
