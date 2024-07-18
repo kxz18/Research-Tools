@@ -293,7 +293,7 @@ AA_GEOMETRY: Dict[str, dict] = {
             "C": "C",
             "CA": "CT1",
             "CB": "CT1",
-            "CD": "CT3",
+            "CD1": "CT3",
             "CG1": "CT2",
             "CG2": "CT3",
             "N": "NH1",
@@ -588,6 +588,8 @@ periodic_table = [ # Periodic Table
     'Lv', 'Ts', 'Og'
 ]
 
+protein_atoms = ['C', 'N', 'O', 'S']
+
 # amino acids
 aas = [
     ('G', 'GLY'), ('A', 'ALA'), ('V', 'VAL'), ('L', 'LEU'),
@@ -731,3 +733,5 @@ aa_smiles = {
     'C': 'C([C@@H](C(=O)O)N)S',
     'P': 'OC(=O)C1CCCN1'
 }
+
+aa_max_n_atoms = max([len(atoms) for atoms in sidechain_atoms.values()]) + len(backbone_atoms) # plus backbone
