@@ -106,9 +106,13 @@ class Trainer:
     def is_oom_return(self, value):
         return isinstance(value, OOMReturn)
 
+    def _train_epoch_begin(self, device):
+        return
+
     def _train_epoch(self, device):
         if self.train_loader.sampler is not None and self.local_rank != -1:  # distributed
             self.train_loader.sampler.set_epoch(self.epoch)
+        self._train_epoch_begin(device)
         t_iter = tqdm(self.train_loader) if self._is_main_proc() else self.train_loader
         for batch in t_iter:
             batch = self.to_device(batch, device)

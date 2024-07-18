@@ -590,6 +590,12 @@ periodic_table = [ # Periodic Table
 
 protein_atoms = ['C', 'N', 'O', 'S']
 
+# bases for RNA/DNA
+bases = [
+    ('DA', 'DA'), ('DG', 'DG'), ('DC', 'DC'), ('DT', 'DT'), # DNA
+    ('RA', 'RA'), ('RG', 'RG'), ('RC', 'RC'), ('RU', 'RU')  # RNA
+]
+
 # amino acids
 aas = [
     ('G', 'GLY'), ('A', 'ALA'), ('V', 'VAL'), ('L', 'LEU'),
