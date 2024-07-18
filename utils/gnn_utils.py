@@ -33,12 +33,82 @@ def graph_to_batch(tensor, batch_id, padding_value=0, mask_is_pad=True):
 
 
 @torch.no_grad()
-def length_to_batch_id(S, lengths):
+def length_to_batch_id(lengths):
     # generate batch id
-    batch_id = torch.zeros_like(S)  # [N]
+    batch_id = torch.zeros(lengths.sum(), dtype=torch.long, device=lengths.device) # [N]
     batch_id[torch.cumsum(lengths, dim=0)[:-1]] = 1
     batch_id.cumsum_(dim=0)  # [N], item idx in the batch
     return batch_id
+
+
+def variadic_arange(size):
+    """
+    from https://torchdrug.ai/docs/_modules/torchdrug/layers/functional/functional.html#variadic_arange
+
+    Return a 1-D tensor that contains integer intervals of variadic sizes.
+    This is a variadic variant of ``torch.arange(stop).expand(batch_size, -1)``.
+
+    Suppose there are :math:`N` intervals.
+
+    Parameters:
+        size (LongTensor): size of intervals of shape :math:`(N,)`
+    """
+    starts = size.cumsum(0) - size
+
+    range = torch.arange(size.sum(), device=size.device)
+    range = range - starts.repeat_interleave(size)
+    return range
+
+
+def variadic_meshgrid(input1, size1, input2, size2):
+    """
+    from https://torchdrug.ai/docs/_modules/torchdrug/layers/functional/functional.html#variadic_meshgrid
+    Compute the Cartesian product for two batches of sets with variadic sizes.
+
+    Suppose there are :math:`N` sets in each input,
+    and the sizes of all sets are summed to :math:`B_1` and :math:`B_2` respectively.
+
+    Parameters:
+        input1 (Tensor): input of shape :math:`(B_1, ...)`
+        size1 (LongTensor): size of :attr:`input1` of shape :math:`(N,)`
+        input2 (Tensor): input of shape :math:`(B_2, ...)`
+        size2 (LongTensor): size of :attr:`input2` of shape :math:`(N,)`
+
+    Returns
+        (Tensor, Tensor): the first and the second elements in the Cartesian product
+    """
+    grid_size = size1 * size2
+    local_index = variadic_arange(grid_size)
+    local_inner_size = size2.repeat_interleave(grid_size)
+    offset1 = (size1.cumsum(0) - size1).repeat_interleave(grid_size)
+    offset2 = (size2.cumsum(0) - size2).repeat_interleave(grid_size)
+    index1 = torch.div(local_index, local_inner_size, rounding_mode="floor") + offset1
+    index2 = local_index % local_inner_size + offset2
+    return input1[index1], input2[index2]
+
+
+def scatter_sort(src: torch.Tensor, index: torch.Tensor, dim=0, descending=False, eps=1e-12):
+    '''
+    from https://github.com/rusty1s/pytorch_scatter/issues/48
+    WARN: the range between src.max() and src.min() should not be too wide for numerical stability
+
+    reproducible
+    '''
+    src, src_perm = torch.sort(src, dim=dim, descending=descending)
+    index = index.take_along_dim(src_perm, dim=dim)
+    index, index_perm = torch.sort(index, dim=dim, stable=True)
+    src = src.take_along_dim(index_perm, dim=dim)
+    perm = src_perm.take_along_dim(index_perm, dim=0)
+    return src, perm
+
+
+def scatter_topk(src: torch.Tensor, index: torch.Tensor, k: int, dim=0, largest=True):
+    indices = torch.arange(src.shape[dim], device=src.device)
+    src, perm = scatter_sort(src, index, dim, descending=largest)
+    index, indices = index[perm], indices[perm]
+    mask = torch.ones_like(index).bool()
+    mask[k:] = index[k:] != index[:-k]
+    return src[mask], indices[mask]
 
 
 def _edge_dist(X, atom_pad_mask, src_dst):
@@ -58,220 +128,26 @@ def _edge_dist(X, atom_pad_mask, src_dst):
     return dist
 
 
-def _knn_edges(X, AP, src_dst, atom_pos_pad_idx, k_neighbors, batch_info, given_dist=None):
+def fully_connect_edges(batch_ids):
+    lengths = scatter_sum(torch.ones_like(batch_ids), batch_ids, dim=0)
+    row, col = variadic_meshgrid(
+        input1=torch.arange(batch_ids.shape[0], device=batch_ids.device),
+        size1=lengths,
+        input2=torch.arange(batch_ids.shape[0], device=batch_ids.device),
+        size2=lengths,
+    )
+    return torch.stack([row, col], dim=0)
+
+
+def knn_edges(k_neighbors, all_edges, dist):
     '''
-    :param X: [N, n_channel, 3], coordinates
-    :param AP: [N, n_channel], atom position with pad type need to be ignored
-    :param src_dst: [Ef, 2], full possible edges represented in (src, dst)
-    :param given_dist: [Ef], given distance of edges
+    :param k_neighbors: int
+    :param all_edges: [2, E], src and tgt of all edges
+    :param dist: [E], distances of each edge
     '''
-    offsets, batch_id, max_n, gni2lni = batch_info
+    row, col = all_edges
 
-    BIGINT = 1e10  # assign a large distance to invalid edges
-    N = X.shape[0]
-    if given_dist is None:
-        dist = _edge_dist(X, AP == atom_pos_pad_idx, src_dst)
-    else:
-        dist = given_dist
-    src_dst = src_dst.transpose(0, 1)  # [2, Ef]
-
-    dist_mat = torch.ones(N, max_n, device=dist.device, dtype=dist.dtype) * BIGINT  # [N, max_n]
-    dist_mat[(src_dst[0], gni2lni[src_dst[1]])] = dist
-    del dist
-    dist_neighbors, dst = torch.topk(dist_mat, k_neighbors, dim=-1, largest=False)  # [N, topk]
-
-    src = torch.arange(0, N, device=dst.device).unsqueeze(-1).repeat(1, k_neighbors)
-    src, dst = src.flatten(), dst.flatten()
-    dist_neighbors = dist_neighbors.flatten()
-    is_valid = dist_neighbors < BIGINT
-    src = src.masked_select(is_valid)
-    dst = dst.masked_select(is_valid)
-
-    dst = dst + offsets[batch_id[src]]  # mapping from local to global node index
-
-    edges = torch.stack([src, dst])  # message passed from dst to src
-
+    # get topk for each node
+    _, indices = scatter_topk(dist, row, k=k_neighbors, largest=False)
+    edges = torch.stack([all_edges[0][indices], all_edges[1][indices]], dim=0) # [2, k*N]
     return edges  # [2, E]
-
-
-def _radial_edges(X, atom_pad_mask, src_dst, dist_cut_off, given_dist=None):
-    '''
-    :param X: [N, n_channel, 3], coordinates
-    :param atom_pad_mask: [N, n_channel], mark the padding positions as 1
-    :param src_dst: [Ef, 2], full possible edges represented in (src, dst)
-    :param given_dist: [Ef], given distance of edges
-    '''
-    if given_dist is None:
-        dist = _edge_dist(X, atom_pad_mask, src_dst)
-    else:
-        dist = given_dist
-    is_valid = dist < dist_cut_off
-    src_dst = src_dst[is_valid]
-    src_dst = src_dst.transpose(0, 1)  # [2, Ef]
-    return src_dst
-
-
-class BatchEdgeConstructor:
-    '''
-    Construct intra-segment edges (intra_edges) and inter-segment edges (inter_edges) with O(Nn) complexity,
-    where n is the largest number of nodes of one graph in the batch.
-    Additionally consider global nodes: 
-        global nodes will connect to all nodes in its segment (global_normal_edges)
-        global nodes will connect to each other regardless of the segments they are in (global_global_edges)
-    Additionally consider edges between adjacent nodes in the sequence in the same segment (seq_edges)
-    '''
-
-    def __init__(self, global_node_id_vocab) -> None:
-        self.global_node_id_vocab = copy(global_node_id_vocab)
-
-        # buffer
-        self._reset_buffer()
-
-    def _reset_buffer(self):
-        self.row = None
-        self.col = None
-        self.row_global = None
-        self.col_global = None
-        self.row_seg = None
-        self.col_seg = None
-        self.offsets = None
-        self.max_n = None
-        self.gni2lni = None
-        self.not_global_edges = None
-
-    def get_batch_edges(self, batch_id):
-        # construct tensors to map between global / local node index
-        lengths = scatter_sum(torch.ones_like(batch_id), batch_id)  # [bs]
-        N, max_n = batch_id.shape[0], torch.max(lengths)
-        offsets = F.pad(torch.cumsum(lengths, dim=0)[:-1], pad=(1, 0), value=0)  # [bs]
-        # global node index to local index. lni2gni can be implemented as lni + offsets[batch_id]
-        gni = torch.arange(N, device=batch_id.device)
-        gni2lni = gni - offsets[batch_id]  # [N]
-
-        # all possible edges (within the same graph)
-        # same bid (get rid of self-loop and none edges)
-        same_bid = torch.zeros(N, max_n, device=batch_id.device)
-        same_bid[(gni, lengths[batch_id] - 1)] = 1
-        same_bid = 1 - torch.cumsum(same_bid, dim=-1)
-        # shift right and pad 1 to the left
-        same_bid = F.pad(same_bid[:, :-1], pad=(1, 0), value=1)
-        same_bid[(gni, gni2lni)] = 0  # delete self loop
-        row, col = torch.nonzero(same_bid).T  # [2, n_edge_all]
-        col = col + offsets[batch_id[row]]  # mapping from local to global node index
-        return (row, col), (offsets, max_n, gni2lni)
-
-    def _prepare(self, S, batch_id, segment_ids) -> None:
-        (row, col), (offsets, max_n, gni2lni) = self.get_batch_edges(batch_id)
-
-        # not global edges
-        is_global = sequential_or(*[S == global_node_id for global_node_id in self.global_node_id_vocab]) # [N]
-        row_global, col_global = is_global[row], is_global[col]
-        not_global_edges = torch.logical_not(torch.logical_or(row_global, col_global))
-        
-        # segment ids
-        row_seg, col_seg = segment_ids[row], segment_ids[col]
-
-        # add to buffer
-        self.row, self.col = row, col
-        self.offsets, self.max_n, self.gni2lni = offsets, max_n, gni2lni
-        self.row_global, self.col_global = row_global, col_global
-        self.not_global_edges = not_global_edges
-        self.row_seg, self.col_seg = row_seg, col_seg
-
-    def _construct_intra_edges(self, X, atom_pad_mask, batch_id):
-        row, col = self.row, self.col
-        # all possible ctx edges: same seg, not global
-        select_edges = torch.logical_and(self.row_seg == self.col_seg, self.not_global_edges)
-        intra_all_row, intra_all_col = row[select_edges], col[select_edges]
-        return torch.stack([intra_all_row, intra_all_col])
-
-    def _construct_inter_edges(self, X, atom_pad_mask, batch_id):
-        row, col = self.row, self.col
-        # all possible inter edges: not same seg, not global
-        select_edges = torch.logical_and(self.row_seg != self.col_seg, self.not_global_edges)
-        inter_all_row, inter_all_col = row[select_edges], col[select_edges]
-        return torch.stack([inter_all_row, inter_all_col])
-
-    def _construct_global_edges(self):
-        row, col = self.row, self.col
-        # edges between global and normal nodes
-        select_edges = torch.logical_and(self.row_seg == self.col_seg, torch.logical_not(self.not_global_edges))
-        global_normal = torch.stack([row[select_edges], col[select_edges]])  # [2, nE]
-        # edges between global and global nodes
-        select_edges = torch.logical_and(self.row_global, self.col_global) # self-loop has been deleted
-        global_global = torch.stack([row[select_edges], col[select_edges]])  # [2, nE]
-        return global_normal, global_global
-
-    def _construct_seq_edges(self):
-        row, col = self.row, self.col
-        # add additional edge to neighbors in 1D sequence (except epitope)
-        select_edges = sequential_and(
-            torch.logical_or((row - col) == 1, (row - col) == -1),  # adjacent in the graph order
-            self.not_global_edges  # not global edges (also ensure the edges are in the same segment)
-        )
-        seq_adj = torch.stack([row[select_edges], col[select_edges]])  # [2, nE]
-        return seq_adj
-
-    @torch.no_grad()
-    def construct_edges(self, X, atom_pad_mask, S, batch_id, k_neighbors, segment_ids):
-        '''
-        Memory efficient with complexity of O(Nn) where n is the largest number of nodes in the batch
-        '''
-        # prepare inputs
-        self._prepare(S, batch_id, segment_ids)
-
-        # intra-segment edges
-        intra_edges = self._construct_intra_edges(X, atom_pad_mask, batch_id, k_neighbors)
-
-        # inter-segment edges
-        inter_edges = self._construct_inter_edges(X, atom_pad_mask, batch_id, k_neighbors)
-
-        # edges between global nodes and normal/global nodes
-        global_normal_edges, global_global_edges = self._construct_global_edges()
-
-        # edges on the 1D sequence
-        seq_edges = self._construct_seq_edges()
-
-        self._reset_buffer()
-
-        return intra_edges, inter_edges, global_normal_edges, global_global_edges, seq_edges
-
-
-class KNNBatchEdgeConstructor(BatchEdgeConstructor):
-    def __init__(self, global_node_id_vocab, k_neighbors) -> None:
-        super().__init__(global_node_id_vocab)
-        self.k_neighbors = k_neighbors
-
-    def _construct_intra_edges(self, X, atom_pad_mask, batch_id):
-        all_intra_edges = super()._construct_intra_edges(X, atom_pad_mask, batch_id)
-        # knn
-        intra_edges = _knn_edges(
-            X, atom_pad_mask, all_intra_edges.T, self.k_neighbors,
-            (self.offsets, batch_id, self.max_n, self.gni2lni))
-        return intra_edges
-    
-    def _construct_outer_edges(self, X, atom_pad_mask, batch_id):
-        all_inter_edges = super()._construct_outer_edges(X, atom_pad_mask, batch_id)
-        # knn
-        inter_edges = _knn_edges(
-            X, atom_pad_mask, all_inter_edges.T, self.k_neighbors,
-            (self.offsets, batch_id, self.max_n, self.gni2lni))
-        return inter_edges
-    
-
-class RadialBatchEdgeConstructor(BatchEdgeConstructor):
-    def __init__(self, global_node_id_vocab, dist_cutoff) -> None:
-        super().__init__(global_node_id_vocab)
-        self.dist_cutoff = dist_cutoff
-    
-    def _construct_intra_edges(self, X, atom_pad_mask, batch_id):
-        all_intra_edges = super()._construct_intra_edges(X, atom_pad_mask, batch_id)
-        # radial (cutoff with distance)
-        intra_edges = _radial_edges(X, atom_pad_mask, all_intra_edges.T, self.dist_cutoff)
-        return intra_edges
-    
-    def _construct_outer_edges(self, X, atom_pad_mask, batch_id):
-        all_inter_edges = super()._construct_outer_edges(X, atom_pad_mask, batch_id)
-        # radial (cutoff with distance)
-        inter_edges = _radial_edges(X, atom_pad_mask, all_inter_edges.T, self.dist_cutoff)
-        return inter_edges
