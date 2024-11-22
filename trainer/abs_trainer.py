@@ -130,8 +130,14 @@ class Trainer:
                 loss = loss.detach() # manually delete the computing graph
             if self.config.grad_clip is not None:
                 ori_grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.grad_clip)
-                # recording gradients
-                self.log('Grad Norm', ori_grad_norm.cpu(), self.global_step)
+            else:
+                ori_grad_norm = 0
+                for p in self.model.parameters():
+                    if p.grad is not None and p.requires_grad:
+                        ori_grad_norm += p.grad.detach().data.norm(2) ** 2
+                ori_grad_norm = ori_grad_norm ** 0.5
+            # recording gradients
+            self.log('Grad Norm', ori_grad_norm.cpu(), self.global_step)
             self.optimizer.step()
             if hasattr(t_iter, 'set_postfix'):
                 t_iter.set_postfix(loss=loss.item(), version=self.version)
