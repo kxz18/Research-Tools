@@ -41,6 +41,9 @@ def main(args, opt_args):
 
     ########## define your model #########
     model = R.construct(config['model'])
+    if len(config.get('load_ckpt', '')):
+        model.load_state_dict(torch.load(config['load_ckpt'], map_location='cpu').state_dict())
+        print_log(f'Loaded weights from {config["load_ckpt"]}')
 
     ########### load your train / valid set ###########
     train_set, valid_set, _ = create_dataset(config['dataset'])
@@ -49,7 +52,8 @@ def main(args, opt_args):
     if len(args.gpus) > 1:
         args.local_rank = int(os.environ['LOCAL_RANK'])
         torch.cuda.set_device(args.local_rank)
-        torch.distributed.init_process_group(backend='nccl', world_size=len(args.gpus))
+        # torch.distributed.init_process_group(backend='nccl', world_size=len(args.gpus))
+        torch.distributed.init_process_group(backend='nccl', world_size=int(os.environ['WORLD_SIZE'])) # set by torchrun
     else:
         args.local_rank = -1
 
@@ -67,4 +71,5 @@ if __name__ == '__main__':
     args, opt_args = parse()
     print_log(f'Overwritting args: {opt_args}')
     setup_seed(args.seed)
+    # torch.autograd.set_detect_anomaly(True)
     main(args, opt_args)

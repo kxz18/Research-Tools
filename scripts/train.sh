@@ -32,11 +32,24 @@ MASTER_ADDR="${ADDR:-localhost}"
 MASTER_PORT="${PORT:-9901}"
 echo "Using GPUs: $GPU"
 echo "Master address: ${MASTER_ADDR}, Master port: ${MASTER_PORT}"
+# Multi-Node distributed training
+if [ -z $NNODE ]; then
+    echo "NNODE not given. Default assuming one node for training."
+    NNODE=1
+fi
 
 export CUDA_VISIBLE_DEVICES=$GPU
 GPU_ARR=(`echo $GPU | tr ',' ' '`)
 
-if [ ${#GPU_ARR[@]} -gt 1 ]; then
+if [ $NNODE -gt 1 ]; then   # some frameworks only support the depricated API torch.distributed.launch for multi-node training
+    echo "Number of nodes: ${NNODE}. Multi-node training enabled."
+    if [ -z ${NODE_RANK} ]; then
+        echo "Environment variable NODE_RANK missing, which is necessary for multi-node distributed training!"
+        exit 1;
+    fi
+    export OMP_NUM_THREADS=2
+    PREFIX="python -m torch.distributed.launch --nproc_per_node=${#GPU_ARR[@]} --master_addr=${MASTER_ADDR} --master_port=${MASTER_PORT} --nnodes=${NNODE} --node_rank=${NODE_RANK}"
+elif [ ${#GPU_ARR[@]} -gt 1 ]; then
     export OMP_NUM_THREADS=2
 	PREFIX="torchrun --nproc_per_node=${#GPU_ARR[@]} --rdzv_backend=c10d --rdzv_endpoint=${MASTER_ADDR}:${MASTER_PORT} --nnodes=1"
 else

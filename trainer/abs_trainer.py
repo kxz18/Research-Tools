@@ -7,6 +7,7 @@ from copy import deepcopy
 from tqdm import tqdm
 
 import wandb # for users preferring wandb over tensorboard
+import atexit
 import numpy as np
 import torch
 from torch.utils.tensorboard import SummaryWriter
@@ -24,6 +25,7 @@ class TrainConfig:
                  grad_interval=1,  # parameter update interval
                  val_freq=1,       # frequence for validation
                  logger=None,
+                 find_unused_parameters=True,   # for DDP training
                  **kwargs):
         self.save_dir = save_dir
         self.max_epoch = max_epoch
@@ -35,6 +37,7 @@ class TrainConfig:
         self.grad_interval = grad_interval
         self.val_freq = val_freq
         self.logger = logger
+        self.find_unused_parameters = find_unused_parameters
         self.__dict__.update(kwargs)
 
     def add_parameter(self, **kwargs):
@@ -92,6 +95,8 @@ class Trainer:
         return data
 
     def _is_main_proc(self):
+        if 'RANK' in os.environ:
+            return int(os.environ['RANK']) == 0
         return self.local_rank == 0 or self.local_rank == -1
 
     def _get_version(self):
@@ -113,7 +118,7 @@ class Trainer:
         if self.train_loader.sampler is not None and self.local_rank != -1:  # distributed
             self.train_loader.sampler.set_epoch(self.epoch)
         self._train_epoch_begin(device)
-        t_iter = tqdm(self.train_loader) if self._is_main_proc() else self.train_loader
+        t_iter = tqdm(self.train_loader, ascii=True) if self._is_main_proc() else self.train_loader
         for batch in t_iter:
             batch = self.to_device(batch, device)
             loss = self.train_step(batch, self.global_step)
@@ -162,7 +167,7 @@ class Trainer:
         self.model.eval()
         self._valid_epoch_begin(device)
         with torch.no_grad():
-            t_iter = tqdm(self.valid_loader) if self._is_main_proc() else self.valid_loader
+            t_iter = tqdm(self.valid_loader, ascii=True) if self._is_main_proc() else self.valid_loader
             for batch in t_iter:
                 batch = self.to_device(batch, device)
                 metric = self.valid_step(batch, self.valid_global_step)
@@ -251,6 +256,7 @@ class Trainer:
                     name=self.config.save_dir.rstrip(os.path.sep).split(os.path.sep)[-1],
                     config=self.save_config
                 )
+                atexit.register(wandb.finish) # for wandb safe exit
                 self.writer = None  # using wandb.log 
             self._modify_writer()
             if not os.path.exists(self.model_dir):
@@ -264,7 +270,8 @@ class Trainer:
         if local_rank != -1:
             print_log(f'Using data parallel, local rank {local_rank}, all {device_ids}')
             self.model = torch.nn.parallel.DistributedDataParallel(
-                self.model, device_ids=[local_rank], output_device=local_rank
+                self.model, device_ids=[local_rank], output_device=local_rank,
+                find_unused_parameters=self.config.find_unused_parameters
             )
         else:
             print_log(f'training on {device_ids}')
