@@ -45,13 +45,14 @@ class MixDatasetWrapper(torch.utils.data.Dataset):
 
 @R.register('DynamicBatchWrapper')
 class DynamicBatchWrapper(torch.utils.data.Dataset):
-    def __init__(self, dataset, complexity, ubound_per_batch) -> None:
+    def __init__(self, dataset, complexity, ubound_per_batch, silent=False) -> None:
         super().__init__()
         self.dataset = dataset
         self.indexes = [i for i in range(len(dataset))]
         self.complexity = complexity
         self.eval_func = sympy.lambdify('n', sympy.simplify(complexity))
         self.ubound_per_batch = ubound_per_batch
+        self.silent = silent
         self.total_size = None
         self.batch_indexes = []
         self._form_batch()
@@ -79,7 +80,10 @@ class DynamicBatchWrapper(torch.utils.data.Dataset):
         cur_complexity = 0
         batch = []
 
-        for i in tqdm(self.indexes):
+        pbar = self.indexes
+        if not self.silent: pbar = tqdm(self.indexes)
+
+        for i in pbar:
             item_len = self.eval_func(self.dataset.get_len(i))
             if item_len > self.ubound_per_batch:
                 continue
