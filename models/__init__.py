@@ -1,5 +1,6 @@
 #!/usr/bin/python
 # -*- coding:utf-8 -*-
+from .sin_example_mlp import SinMLP
 
 import utils.register as R
 

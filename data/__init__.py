@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # -*- coding:utf-8 -*-
 from .dataset_wrapper import MixDatasetWrapper
-from .molecule import MoleculeDataset
+from .sin_example_dataset import SinDataset
 
 import torch
 from torch.utils.data import DataLoader

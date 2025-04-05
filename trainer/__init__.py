@@ -1,6 +1,6 @@
 #!/usr/bin/python
 # -*- coding:utf-8 -*-
-
+from .sin_exampler_trainer import SinTrainer
 
 import utils.register as R
 

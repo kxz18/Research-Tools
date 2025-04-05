@@ -1,0 +1,49 @@
+dataset:
+  train:
+    class: SinDataset
+    length: 10000
+  
+  valid:
+    class: SinDataset
+    length: 100
+
+
+dataloader:
+  train:
+    shuffle: true
+    num_workers: 4
+    batch_size: 64 # if multiple GPUs are used, this means the total batch size
+  valid:
+    num_workers: 4
+    batch_size: 32
+
+trainer:
+  class: SinTrainer
+  config:
+    max_epoch: 10
+    save_topk: 3
+    val_freq: 1
+    save_dir: ./ckpts/sin_predictor
+    patience: 3
+    metric_min_better: true
+    proj_name: SinExample # for wandb
+    logger: tensorboard
+
+    optimizer:
+      class: AdamW
+      lr: 1.0e-3
+
+    scheduler:
+      class: ReduceLROnPlateau
+      factor: 0.8
+      patience: 5
+      mode: min
+      frequency: val_epoch
+      min_lr: 5.0e-6
+
+model:
+  class: SinMLP
+  input_size: 1
+  hidden_size: 128
+  output_size: 1
+  n_layers: 3
