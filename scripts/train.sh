@@ -48,10 +48,11 @@ if [ $NNODE -gt 1 ]; then   # some frameworks only support the depricated API to
         exit 1;
     fi
     export OMP_NUM_THREADS=2
-    PREFIX="python -m torch.distributed.launch --nproc_per_node=${#GPU_ARR[@]} --master_addr=${MASTER_ADDR} --master_port=${MASTER_PORT} --nnodes=${NNODE} --node_rank=${NODE_RANK}"
+    # PREFIX="python -m torch.distributed.launch --nproc_per_node=${#GPU_ARR[@]} --master_addr=${MASTER_ADDR} --master_port=${MASTER_PORT} --nnodes=${NNODE} --node_rank=${NODE_RANK}"
+    PREFIX="torchrun --nproc_per_node=${#GPU_ARR[@]} --master_addr=${MASTER_ADDR} --master_port=${MASTER_PORT} --nnodes=${NNODE} --node_rank=${NODE_RANK} --max-restarts=10"
 elif [ ${#GPU_ARR[@]} -gt 1 ]; then
     export OMP_NUM_THREADS=2
-	PREFIX="torchrun --nproc_per_node=${#GPU_ARR[@]} --rdzv_backend=c10d --rdzv_endpoint=${MASTER_ADDR}:${MASTER_PORT} --nnodes=1"
+	PREFIX="torchrun --nproc_per_node=${#GPU_ARR[@]} --rdzv_backend=c10d --rdzv_endpoint=${MASTER_ADDR}:${MASTER_PORT} --nnodes=1 --max-restarts=10"
 else
     PREFIX="python"
 fi
