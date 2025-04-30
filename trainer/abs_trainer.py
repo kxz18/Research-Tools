@@ -10,6 +10,7 @@ import wandb # for users preferring wandb over tensorboard
 import atexit
 import numpy as np
 import torch
+import torch.distributed as dist
 from torch.utils.tensorboard import SummaryWriter
 
 from utils.oom_decorator import OOMReturn, safe_backward
@@ -122,28 +123,49 @@ class Trainer:
         for batch in t_iter:
             batch = self.to_device(batch, device)
             loss = self.train_step(batch, self.global_step)
+
+            skip_step = torch.tensor([0], dtype=torch.int, device=device)
+
             if self.is_oom_return(loss):
                 print_log(f'Out of memory, local rank {self.local_rank}', level='WARN')
                 loss = loss.fake_loss
+                skip_step.fill_(1)
             elif torch.isnan(loss):
                 print_log(f'Loss is nan, local_rank {self.local_rank}', level='WARN')
                 loss = sum([p.norm() for p in self.model.parameters() if p.dtype == torch.float]) * 0.0
+                skip_step.fill_(1)
+            elif torch.isinf(loss):
+                print_log(f'Loss is inf, local_rank {self.local_rank}', level='WARN')
+                skip_step.fill_(1)
+
             self.optimizer.zero_grad()
-            backward_ok = safe_backward(loss, self.model)
-            if not backward_ok:
-                print_log(f'Backward out of memory, skip', level='WARN')
-                loss = loss.detach() # manually delete the computing graph
-            if self.config.grad_clip is not None:
-                ori_grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.grad_clip)
+            
+            if dist.is_initialized(): dist.all_reduce(skip_step, op=dist.ReduceOp.MAX)
+
+            if skip_step.item() == 0:
+                backward_ok = safe_backward(loss, self.model)
+                if not backward_ok:
+                    print_log(f'Backward out of memory, skip', level='WARN')
+                    loss = loss.detach() # manually delete the computing graph
+                    skip_step.fill_(1)
+                    if dist.is_initialized(): dist.all_reduce(skip_step, op=dist.ReduceOp.MAX)
+
+            if skip_step.item() == 0:
+                if self.config.grad_clip is not None:
+                    ori_grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.grad_clip)
+                else:
+                    ori_grad_norm = 0
+                    for p in self.model.parameters():
+                        if p.grad is not None and p.requires_grad:
+                            ori_grad_norm += p.grad.detach().data.norm(2) ** 2
+                    ori_grad_norm = ori_grad_norm ** 0.5
+                # recording gradients
+                self.log('Grad Norm', ori_grad_norm.cpu(), self.global_step)
+                self.optimizer.step()
             else:
-                ori_grad_norm = 0
-                for p in self.model.parameters():
-                    if p.grad is not None and p.requires_grad:
-                        ori_grad_norm += p.grad.detach().data.norm(2) ** 2
-                ori_grad_norm = ori_grad_norm ** 0.5
-            # recording gradients
-            self.log('Grad Norm', ori_grad_norm.cpu(), self.global_step)
-            self.optimizer.step()
+                self.optimizer.zero_grad()
+                torch.cuda.empty_cache()  # delete gradient memory
+            
             if hasattr(t_iter, 'set_postfix'):
                 t_iter.set_postfix(loss=loss.item(), version=self.version)
             self.global_step += 1
