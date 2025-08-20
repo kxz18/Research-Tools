@@ -19,13 +19,19 @@ def high_dim_scatterplot(data, vec, x='dim1', y='dim2', hue=None, labels=None, p
     return scatterplot(reduced_data, x, y, hue, labels, post_edit_func, save_path, **kwargs)
 
 
-def scatterplot(data, x, y, hue=None, labels=None, post_edit_func=None, save_path=None, **kwargs):
+def scatterplot(data, x, y, hue=None, labels=None, post_edit_func=None, save_path=None, use_color_bar_for_hue=False, **kwargs):
     ax = sns.scatterplot(data=data, x=x, y=y, hue=hue, **kwargs)
     if labels is not None:
         for i, label in enumerate(labels):
             if label is None:
                 continue
             ax.text(data[x][i], data[y][i], str(label), fontweight='bold')
+    if use_color_bar_for_hue and (hue is not None):
+        norm = plt.Normalize(min(data[hue]), max(data[hue]))
+        sm = plt.cm.ScalarMappable(cmap=kwargs.get('palette', None), norm=norm)
+        sm.set_array([])
+        ax.get_legend().remove()
+        ax.figure.colorbar(sm, ax=ax)
     post_edit(ax, post_edit_func, save_path)
     return ax
 
