@@ -20,6 +20,11 @@ def high_dim_scatterplot(data, vec, x='dim1', y='dim2', hue=None, labels=None, p
 
 
 def scatterplot(data, x, y, hue=None, labels=None, post_edit_func=None, save_path=None, use_color_bar_for_hue=False, **kwargs):
+    if use_color_bar_for_hue and (hue is not None): # setup for color bar
+        if 'palette' not in kwargs: kwargs['palette'] = 'ch:'
+        if kwargs.get('legend', True):
+            print('Setting legend to False since use_color_bar_for_hue is set to True')
+            kwargs['legend'] = False
     ax = sns.scatterplot(data=data, x=x, y=y, hue=hue, **kwargs)
     if labels is not None:
         for i, label in enumerate(labels):
@@ -28,9 +33,9 @@ def scatterplot(data, x, y, hue=None, labels=None, post_edit_func=None, save_pat
             ax.text(data[x][i], data[y][i], str(label), fontweight='bold')
     if use_color_bar_for_hue and (hue is not None):
         norm = plt.Normalize(min(data[hue]), max(data[hue]))
-        sm = plt.cm.ScalarMappable(cmap=kwargs.get('palette', None), norm=norm)
+        sm = plt.cm.ScalarMappable(cmap=sns.color_palette(kwargs['palette'], as_cmap=True), norm=norm)
         sm.set_array([])
-        ax.get_legend().remove()
+        # ax.get_legend().remove()
         ax.figure.colorbar(sm, ax=ax)
     post_edit(ax, post_edit_func, save_path)
     return ax
