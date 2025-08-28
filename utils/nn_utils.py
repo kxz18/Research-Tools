@@ -41,3 +41,17 @@ class SinusoidalPositionEmbedding(nn.Module):
         embeddings = torch.stack([torch.sin(embeddings), torch.cos(embeddings)], dim=-1)
         embeddings = embeddings.reshape(-1, self.output_dim)
         return embeddings
+
+
+def kl_loss(model_mu, model_log_var, prior_mu=0.0, prior_std=1.0):
+    '''
+        p is the model generated distribution, N(mu_1, sigma_1), q is the prior N(mu_2, sigma_2)
+        KL(p, q) = log(sigma_2/sigma_1) +(sigma_1^2 + (mu_1 - mu_2)^2) / (2*sigma_2^2) - 1/2
+                 = -0.5 * (1.0 + log(sigma_1^2) - log(sigma_2^2) - (sigma_1^2 + (mu_1 - mu_2)^2) / sigma_2^2)
+    '''
+    model_var = torch.exp(model_log_var)
+    prior_var = prior_std ** 2
+    delta_mu = model_mu - prior_mu
+    if isinstance(prior_std, float): prior_std = torch.tensor(prior_std, device=model_log_var.device)
+    kl = -0.5 * torch.sum((1.0 + model_log_var - 2 * torch.log(prior_std) - (delta_mu * delta_mu + model_var) / prior_var))
+    return kl
