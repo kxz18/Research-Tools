@@ -39,7 +39,7 @@ def _find_measure_unit(num_bytes):
     return size, measure_unit
 
 
-def create_mmap(iterator, out_dir, total_len=None, commit_batch=10000):
+def create_mmap(iterator, out_dir, total_len=None, commit_batch=10000, abbr_desc_len=-1):
     
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
@@ -49,12 +49,12 @@ def create_mmap(iterator, out_dir, total_len=None, commit_batch=10000):
     index_file = open(os.path.join(out_dir, 'index.txt'), 'w')
 
     i, offset, n_finished = 0, 0, 0
-    progress_bar = tqdm(iterator, total=total_len)
+    progress_bar = tqdm(iterator, total=total_len, ascii=True)
     for _id, x, properties, entry_idx in iterator:
-        progress_bar.set_description(f'Processing {_id}')
+        progress_bar.set_description(f'Processing {(_id[:abbr_desc_len] + "...") if abbr_desc_len > 0 else _id}')
         compressed_x = compress(x)
         bin_length = data_file.write(compressed_x)
-        properties = '\t'.join([str(prop) for prop in properties])
+        properties = json.dumps(properties)
         index_file.write(f'{_id}\t{offset}\t{offset + bin_length}\t{properties}\n') # tuple of (_id, start, end), data slice is [start, end)
         offset += bin_length
         i += 1
@@ -78,7 +78,7 @@ def create_mmap(iterator, out_dir, total_len=None, commit_batch=10000):
 
 class MMAPDataset(torch.utils.data.Dataset):
     
-    def __init__(self, mmap_dir: str, specify_data: Optional[str]=None, specify_index: Optional[str]=None) -> None:
+    def __init__(self, mmap_dir: str, specify_data: Optional[str]=None, specify_index: Optional[str]=None, in_memory: bool=False) -> None:
         super().__init__()
 
         self._indexes = []
@@ -88,13 +88,15 @@ class MMAPDataset(torch.utils.data.Dataset):
             for line in f.readlines():
                 messages = line.strip().split('\t')
                 _id, start, end = messages[:3]
-                _property = messages[3:]
+                _property = json.loads(messages[3])
                 self._indexes.append((_id, int(start), int(end)))
                 self._properties.append(_property)
         _data_path = os.path.join(mmap_dir, 'data.bin') if specify_data is None else specify_data
         self._data_file = open(_data_path, 'rb')
         self._mmap = mmap.mmap(self._data_file.fileno(), 0, access=mmap.ACCESS_READ)
-    
+        self.in_memory = in_memory
+        self.cache = [None for _ in range(len(self._indexes))] if in_memory else None
+
     def __del__(self):
         self._mmap.close()
         self._data_file.close()
@@ -106,7 +108,14 @@ class MMAPDataset(torch.utils.data.Dataset):
         if idx < 0 or idx >= len(self):
             raise IndexError(idx)
         
-        _, start, end = self._indexes[idx]
-        data = decompress(self._mmap[start:end])
+        if self.in_memory:
+            data = self.cache[idx]
+            if data is None:
+                _, start, end = self._indexes[idx]
+                data = decompress(self._mmap[start:end])
+                self.cache[idx] = data
+        else:
+            _, start, end = self._indexes[idx]
+            data = decompress(self._mmap[start:end])
 
         return data
