@@ -19,6 +19,16 @@ def get(name):
     return _NAMESPACE[name]
 
 
+def recur_construct(val: any):
+    if isinstance(val, dict):
+        if 'class' in val: return construct(val) # leaf node
+        for key in val:
+            val[key] = recur_construct(val[key])
+    elif isinstance(val, list):
+        val = [recur_construct(v) for v in val]
+    return val
+
+
 def construct(config: Dict, **kwargs):
     config = deepcopy(config)
     cls_name = config.pop('class')
