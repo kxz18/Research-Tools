@@ -205,7 +205,7 @@ class Trainer:
 
             if self.is_oom_return(loss):
                 print_log(f'Out of memory, local rank {self.local_rank}', level='WARN')
-                loss = loss.fake_loss
+                # loss = loss.fake_loss
                 skip_step.fill_(1)
             elif torch.isnan(loss):
                 print_log(f'Loss is nan, local_rank {self.local_rank}', level='WARN')
@@ -226,7 +226,8 @@ class Trainer:
                     loss = loss.detach() # manually delete the computing graph
                     skip_step.fill_(1)
                     if dist.is_initialized(): dist.all_reduce(skip_step, op=dist.ReduceOp.MAX)
-
+            else: loss = loss.detach()  # forward loss has some problems, manually delete the computing graph
+            
             if skip_step.item() == 0:
                 if self.config.grad_clip is not None:
                     ori_grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.grad_clip)
