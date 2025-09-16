@@ -284,6 +284,8 @@ class Trainer:
             self.patience = self.config.patience
         else:
             self.patience -= 1
+        if self.sched_freq == 'val_epoch':
+            self.scheduler.step(valid_metric)
         self.last_valid_metric = valid_metric
         # write valid_metric
         for name in self.writer_buffer:
