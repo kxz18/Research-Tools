@@ -226,7 +226,8 @@ class Trainer:
                     loss = loss.detach() # manually delete the computing graph
                     skip_step.fill_(1)
                     if dist.is_initialized(): dist.all_reduce(skip_step, op=dist.ReduceOp.MAX)
-            else: loss = loss.detach()  # forward loss has some problems, manually delete the computing graph
+            else:
+                if isinstance(loss, torch.Tensor): loss = loss.detach()  # forward loss has some problems, manually delete the computing graph
             
             if skip_step.item() == 0:
                 if self.config.grad_clip is not None:
