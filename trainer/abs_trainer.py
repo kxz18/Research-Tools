@@ -20,17 +20,20 @@ from utils.logger import print_log
 
 
 class TrainConfig:
-    def __init__(self, save_dir, max_epoch, warmup=0,
+    def __init__(self, save_dir, max_epoch=None, max_step=None, warmup=0,
                  metric_min_better=True, patience=3,
-                 grad_clip=None, save_topk=-1,  # -1 for save all
-                 grad_interval=1,  # parameter update interval
-                 val_freq=1,       # frequence for validation
+                 grad_clip=None, save_topk=-1,      # -1 for save all
+                 grad_interval=1,                   # parameter update interval
+                 val_freq=1,                        # frequence for validation
+                 val_freq_mode='epoch',             # epoch / step
                  logger=None,
-                 find_unused_parameters=True,   # for DDP training
-                 continue_version=None,         # the version to continue (None for starting from ground up)
+                 find_unused_parameters=True,       # for DDP training
+                 continue_version=None,             # the version to continue (None for starting from ground up)
                  **kwargs):
         self.save_dir = save_dir
         self.max_epoch = max_epoch
+        self.max_step = max_step
+        assert not ((self.max_epoch is None) and (self.max_step is None)), 'At least one of max_epoch and max_step should be specified.'
         self.warmup = warmup
         self.metric_min_better = metric_min_better
         self.patience = patience if patience > 0 else max_epoch
@@ -38,6 +41,8 @@ class TrainConfig:
         self.save_topk = save_topk
         self.grad_interval = grad_interval
         self.val_freq = val_freq
+        self.val_freq_mode = val_freq_mode
+        assert self.val_freq_mode in ['epoch', 'step'], 'val_freq_mode must be epoch or step'
         self.logger = logger
         self.find_unused_parameters = find_unused_parameters
         self.continue_version = continue_version
@@ -248,8 +253,14 @@ class Trainer:
             if hasattr(t_iter, 'set_postfix'):
                 t_iter.set_postfix(loss=loss.item(), version=self.version)
             self.global_step += 1
-            if self.sched_freq == 'batch':
+            # validate if frequency is defined by step
+            if (self.config.val_freq_mode == 'step') and (self.global_step % self.config.val_freq == 0):
+                print_log(f'validating ...') if self._is_main_proc() else 1
+                self._valid_epoch(device)
+            if self.sched_freq == 'step':
                 self.scheduler.step()
+            # stop criterion might be steps
+            if self._check_train_finished(): break
         if self.sched_freq == 'epoch':
             self.scheduler.step()
         self._train_epoch_end(device)
@@ -341,6 +352,14 @@ class Trainer:
     def _modify_writer(self):
         return
 
+    def _check_train_finished(self):
+        finish_flag = False
+        if self.config.max_epoch is not None:
+            finish_flag = finish_flag or (self.epoch >= self.config.max_epoch)
+        if self.config.max_step is not None:
+            finish_flag = finish_flag or (self.global_step >= self.config.max_step)
+        return finish_flag
+
     def train(self, device_ids, local_rank):
         # set local rank
         self.local_rank = local_rank
@@ -378,10 +397,10 @@ class Trainer:
             )
         else:
             print_log(f'training on {device_ids}')
-        while self.epoch < self.config.max_epoch:
+        while not self._check_train_finished():
             print_log(f'epoch{self.epoch} starts') if self._is_main_proc() else 1
             self._train_epoch(device)
-            if (self.epoch + 1) % self.config.val_freq == 0:
+            if (self.config.val_freq_mode == 'epoch') and ((self.epoch + 1) % self.config.val_freq == 0):
                 print_log(f'validating ...') if self._is_main_proc() else 1
                 self._valid_epoch(device)
             self.epoch += 1
