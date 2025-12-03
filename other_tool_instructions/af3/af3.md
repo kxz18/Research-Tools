@@ -68,6 +68,8 @@ Build data for CCD:
 ./env/bin/build_data
 ```
 
+Don't forget to download the AF3 weights (you need to apply for it) and put it (`af3.bin.zst`) under `alphafold3/model_para`.
+
 Modify the `REPO_DIR` environment to the absolute path of your alphafold3 folder in the provided script `alphafold3_predict.sh` under this repo, and use it for inference.
 
 Example with disabled MSA and template search:
