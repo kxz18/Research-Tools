@@ -59,7 +59,7 @@ Then get back to the root directory of alphafold3 and use pip to install the dep
 
 ```bash
 pip3 install --no-deps .
-pip3 install tqdm
+pip3 install tqdm absl-py zstandard numpy dm-tree dm-haiku==0.0.13 jax==0.4.34 jax[cuda12]==0.4.34 jax-triton==0.2.0 jaxtyping==0.2.34 rdkit==2024.3.5 triton==3.1.0 typeguard==2.13.3 
 ```
 
 Build data for CCD:
@@ -68,6 +68,8 @@ Build data for CCD:
 ./env/bin/build_data
 ```
 
+Put the provided file `source.sh` under this folder to `alphafold3`.
+
 Don't forget to download the AF3 weights (you need to apply for it) and put it (`af3.bin.zst`) under `alphafold3/model_para`.
 
 Modify the `REPO_DIR` environment to the absolute path of your alphafold3 folder in the provided script `alphafold3_predict.sh` under this repo, and use it for inference.
@@ -75,7 +77,7 @@ Modify the `REPO_DIR` environment to the absolute path of your alphafold3 folder
 Example with disabled MSA and template search:
 
 ```bash
-./alphafold3_predict.sh --json_path ./example_input.json --out_dir ./example_output
+./alphafold3_predict.sh --json_path ./example_input.json --output_dir ./example_output
 ```
 
 If you want to enable MSA for a certain chain, just delete the two lines for the chain:
