@@ -5,10 +5,15 @@ import seaborn as sns
 sns.set_theme()
 
 from .post_editor import post_edit
+from .significance import add_significance
 
 
-def boxplot(data, x, y, hue=None, post_edit_func=None, save_path=None, **kwargs):
+def boxplot(data, x, y, hue=None, post_edit_func=None, save_path=None, overlay_points=False, point_size=10, significance_pairs=None, **kwargs):
     ax = sns.boxplot(data=data, x=x, y=y, hue=hue, **kwargs)
+    if overlay_points:
+        sns.stripplot(x=x, y=y, hue=hue, data=data, dodge=True, size=point_size, alpha=0.6, ax=ax, legend=False)
+    if significance_pairs is not None:
+        add_significance(ax, data, x, y, hue, significance_pairs, plot_type='boxplot')
     post_edit(ax, post_edit_func, save_path)
     return ax
 

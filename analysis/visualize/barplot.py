@@ -12,7 +12,7 @@ def barplot(data, x, y, hue=None, post_edit_func=None, save_path=None, overlay_p
     if overlay_points:
         sns.stripplot(x=x, y=y, hue=hue, data=data, dodge=True, size=point_size, alpha=0.6, ax=ax, legend=False)
     if significance_pairs is not None:
-        add_significance(ax, data, x, y, hue, significance_pairs)
+        add_significance(ax, data, x, y, hue, significance_pairs, plot_type='barplot')
     post_edit(ax, post_edit_func, save_path)
     return ax
 

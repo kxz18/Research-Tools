@@ -18,16 +18,16 @@ def _get_borderline(r1, r2, l, h):
     return max(l1, l2), max(h1, h2)
 
 
-def add_significance_pair(ax, data, x_name, y_name, hue_name, col_a, col_b, mark_ranges):
-    # statistical annotation
+def _barplot_get_x(ax, col_a, col_b):
     x_order = [t.get_text() for t in ax.get_xticklabels()]
     hue_order = [t.get_text() for t in ax.legend_.texts] if (ax.legend_ is not None) else None
     patch_to_key = {}
+    patches = ax.patches
     if hue_order is None:
-        for i, patch in enumerate(ax.patches): patch_to_key[x_order[i]] = patch
+        for i, patch in enumerate(patches): patch_to_key[x_order[i]] = patch
     else:
         n_x, n_hue = len(x_order), len(hue_order)
-        for i, patch in enumerate(ax.patches):
+        for i, patch in enumerate(patches):
             if i == (n_x * n_hue): break
             x_idx = i % n_x
             h_idx = i // n_x
@@ -36,6 +36,35 @@ def add_significance_pair(ax, data, x_name, y_name, hue_name, col_a, col_b, mark
     
     x1 = patch_to_key[col_a].get_x() + patch_to_key[col_a].get_width() / 2
     x2 = patch_to_key[col_b].get_x() + patch_to_key[col_b].get_width() / 2
+    return x1, x2
+
+
+def _boxplot_get_x(ax, col_a, col_b):
+    x_order = [t.get_text() for t in ax.get_xticklabels()]
+    hue_order = [t.get_text() for t in ax.legend_.texts] if (ax.legend_ is not None) else None
+    total_width = 0.8
+    x_pos = {}
+    if hue_order is None:
+        for i, x_name in enumerate(x_order): x_pos[x_name] = i
+    else:
+        n_x, n_hue = len(x_order), len(hue_order)
+        for i, x_name in enumerate(x_order):
+            for j, hue_name in enumerate(hue_order):
+                x_center = (
+                    i
+                    - total_width / 2
+                    + (total_width / n_hue) / 2
+                    + j * (total_width / n_hue)
+                )
+                x_pos[(x_name, hue_name)] = x_center
+    
+    x1, x2 = x_pos[col_a], x_pos[col_b]
+    return x1, x2
+
+
+def add_significance_pair(ax, data, x_name, y_name, hue_name, col_a, col_b, mark_ranges, plot_type='barplot'):
+    if plot_type == 'barplot': x1, x2 = _barplot_get_x(ax, col_a, col_b)
+    elif plot_type == 'boxplot': x1, x2 = _boxplot_get_x(ax, col_a, col_b)
 
     y_vals, x1_y_vals, x2_y_vals = [], [], []
     hue = [None] * len(data[x_name]) if hue_name is None else data[hue_name]
@@ -52,20 +81,20 @@ def add_significance_pair(ax, data, x_name, y_name, hue_name, col_a, col_b, mark
     y = _get_borderline(mark_ranges.get(col_a, None), mark_ranges.get(col_b, None), y, y + h)[0]
 
     p = ttest_ind(x1_y_vals, x2_y_vals).pvalue
-    p_str = f'{p:.3e}' if p < 0.01 else str(round(p, 3))
+    p_str = f'{p:.2e}' if p < 0.01 else str(round(p, 2))
     plt.plot([x1, x1, x2, x2], [y, y + h, y + h, y], lw=1.5, c=col)
     plt.text((x1 + x2) * .5, y + h, f'p = {p_str}', ha='center', va='bottom', color=col)
     return (y, y + 2 * h)    # annotation range
 
 
-def add_significance(ax, data, x_name, y_name, hue_name, pairs):
+def add_significance(ax, data, x_name, y_name, hue_name, pairs, plot_type):
     # make ylim larger so that the p-value can be fit into the figure
     mark_ranges = {}
     for x1, x2 in pairs:
         if isinstance(x1, list): x1 = tuple(x1)
         if isinstance(x2, list): x2 = tuple(x2)
         # shift y position according to how many times this group has been marked
-        l, h = add_significance_pair(ax, data, x_name, y_name, hue_name, x1, x2, mark_ranges)
+        l, h = add_significance_pair(ax, data, x_name, y_name, hue_name, x1, x2, mark_ranges, plot_type)
         if h * 1.1 >= ax.get_ylim()[1]:
             ax.set_ylim(top=h * 1.1)
         if x1 not in mark_ranges: mark_ranges[x1] = [l, h]
