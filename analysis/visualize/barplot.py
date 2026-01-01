@@ -1,16 +1,18 @@
 #!/usr/bin/python
 # -*- coding:utf-8 -*-
-import matplotlib.pyplot as plt
 import seaborn as sns
 sns.set_theme()
 
 from .post_editor import post_edit
+from .significance import add_significance
 
 
-def barplot(data, x, y, hue=None, post_edit_func=None, save_path=None, overlay_points=False, point_size=10, **kwargs):
+def barplot(data, x, y, hue=None, post_edit_func=None, save_path=None, overlay_points=False, point_size=10, significance_pairs=None, **kwargs):
     ax = sns.barplot(data=data, x=x, y=y, hue=hue, **kwargs)
     if overlay_points:
         sns.stripplot(x=x, y=y, hue=hue, data=data, dodge=True, size=point_size, alpha=0.6, ax=ax, legend=False)
+    if significance_pairs is not None:
+        add_significance(ax, data, x, y, hue, significance_pairs)
     post_edit(ax, post_edit_func, save_path)
     return ax
 
@@ -37,5 +39,5 @@ if __name__ == '__main__':
     barplot(
         data, x='class', y='value', hue='subtype', save_path='barplot_sci.png',
         errorbar='sd', edgecolor='black', err_kws={'linewidth': 3.0}, capsize=0.4, alpha=0.5,
-        overlay_points=True, point_size=10
+        overlay_points=True, point_size=10, significance_pairs=[(('A', 'minor'), ('B', 'minor')), (('A', 'major'), ('B', 'minor'))]
     )
